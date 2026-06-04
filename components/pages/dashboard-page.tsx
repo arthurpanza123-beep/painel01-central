@@ -214,7 +214,7 @@ export function DashboardPage({ onNavigate, metrics }: DashboardPageProps) {
               <h2 className="text-sm font-semibold text-white">Hoje na operação</h2>
             </div>
             <div className="flex items-center gap-3">
-              {/* Indicador de fonte de dados — MOCK = laranja, Supabase = verde */}
+              {/* Indicador de fonte de dados — Modo teste = laranja, Supabase = verde */}
               <span
                 className="text-[10px] px-2 py-0.5 rounded-full font-medium"
                 style={{
@@ -223,7 +223,7 @@ export function DashboardPage({ onNavigate, metrics }: DashboardPageProps) {
                   border:     `1px solid ${metrics?.data_source === 'supabase' ? 'rgba(34,197,94,0.25)' : 'rgba(245,158,11,0.25)'}`,
                 }}
               >
-                {metrics?.data_source === 'supabase' ? 'Supabase' : 'Mock'}
+                {metrics?.data_source === 'supabase' ? 'Supabase' : 'Modo teste'}
               </span>
               <button
                 onClick={() => onNavigate('pipeline')}

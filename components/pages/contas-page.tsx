@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Search, Layers, Copy, X, UserPlus, Calendar,
-  Server, KeyRound, Check, Plus, MessageCircle, Tv2,
+  Server, KeyRound, Check, Plus, Tv2,
 } from 'lucide-react'
 import {
   MOCK_CONTAS,
@@ -56,12 +56,12 @@ function AtivarModal({
   )
   const selecionado = MOCK_CLIENTES.find((c) => c.id === clienteId)
 
-  const gerarMensagem = () => {
+  const copiarCredenciais = () => {
     if (!selecionado) return
     navigator.clipboard.writeText(
-      `Ola ${selecionado.nome}! Seu acesso foi ativado.\nApp: ${conta.app}\nServidor: ${conta.servidor}\nUsuario: ${conta.usuario}\nSenha: ${conta.senha}`
+      `Cliente: ${selecionado.nome}\nApp: ${conta.app}\nServidor: ${conta.servidor}\nUsuario: ${conta.usuario}\nSenha: ${conta.senha}`
     )
-    addToast('success', 'Mensagem final copiada')
+    addToast('success', 'Credenciais copiadas')
   }
 
   return (
@@ -127,14 +127,14 @@ function AtivarModal({
           </div>
         </div>
 
-        {/* 3. Gerar mensagem */}
+        {/* 3. Copiar credenciais */}
         {selecionado && (
           <button
-            onClick={gerarMensagem}
+            onClick={copiarCredenciais}
             className="w-full h-9 rounded-lg text-xs font-medium flex items-center justify-center gap-2"
-            style={{ background: 'rgba(34,197,94,0.1)', color: '#4ade80', border: '1px solid rgba(34,197,94,0.2)' }}
+            style={{ background: 'rgba(59,130,246,0.1)', color: '#60a5fa', border: '1px solid rgba(59,130,246,0.2)' }}
           >
-            <MessageCircle className="h-3.5 w-3.5" /> Gerar mensagem final
+            <Copy className="h-3.5 w-3.5" /> Copiar credenciais
           </button>
         )}
       </div>

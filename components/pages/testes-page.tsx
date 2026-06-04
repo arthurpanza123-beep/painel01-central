@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-  MessageCircle, Send, TrendingUp, TestTube2, Search, Radio,
+  TrendingUp, TestTube2, Search, Radio,
   Copy, X, CheckCircle, Clock, ExternalLink, Zap, AlertTriangle
 } from 'lucide-react'
 import {
@@ -62,9 +62,8 @@ function TesteDrawer({ teste, onClose }: { teste: Teste; onClose: () => void }) 
   const [expirado, setExpirado] = useState(false)
   const cfg = STATUS_CFG[teste.status]
 
-  const mensagem = [
-    `Olá ${teste.cliente}! Segue seu acesso:`,
-    ``,
+  const dadosTecnicos = [
+    `Cliente: ${teste.cliente}`,
     `App: ${teste.app}`,
     `Servidor: ${teste.servidor}`,
     `Usuário: ${teste.usuario}`,
@@ -72,14 +71,14 @@ function TesteDrawer({ teste, onClose }: { teste: Teste; onClose: () => void }) 
     `Validade: ${teste.validade}`,
   ].join('\n')
 
-  const copiarMensagem = () => {
-    navigator.clipboard.writeText(mensagem)
-    addToast('success', 'Mensagem copiada!')
+  const copiarDados = () => {
+    navigator.clipboard.writeText(dadosTecnicos)
+    addToast('success', 'Dados copiados!')
   }
 
-  const abrirWhatsApp = () => {
-    const tel = teste.telefone.replace(/\D/g, '')
-    window.open(`https://wa.me/55${tel}?text=${encodeURIComponent(mensagem)}`, '_blank')
+  const abrirPainel2 = () => {
+    const params = new URLSearchParams({ cliente: teste.cliente, telefone: teste.telefone, app: teste.app })
+    window.open(`https://painel2.centralplayplus.com.br?${params.toString()}`, '_blank')
   }
 
   const expirarTeste = async () => {
@@ -151,26 +150,17 @@ function TesteDrawer({ teste, onClose }: { teste: Teste; onClose: () => void }) 
           ))}
         </div>
 
-        {/* Mensagem */}
-        <div>
-          <p className="text-[11px] text-slate-500 uppercase tracking-wider mb-2">Mensagem</p>
-          <pre className="text-xs text-slate-300 whitespace-pre-wrap font-mono leading-relaxed rounded-xl p-4"
-            style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
-            {mensagem}
-          </pre>
-        </div>
-
         {/* Ações principais */}
         <div className="grid grid-cols-2 gap-2.5">
-          <button onClick={copiarMensagem}
+          <button onClick={copiarDados}
             className="h-10 rounded-xl text-xs font-semibold flex items-center justify-center gap-2"
             style={{ background: 'rgba(59,130,246,0.1)', color: '#93c5fd', border: '1px solid rgba(59,130,246,0.2)' }}>
-            <Copy className="h-3.5 w-3.5" /> Copiar
+            <Copy className="h-3.5 w-3.5" /> Copiar dados
           </button>
-          <button onClick={abrirWhatsApp}
+          <button onClick={abrirPainel2}
             className="h-10 rounded-xl text-xs font-semibold flex items-center justify-center gap-2"
-            style={{ background: 'rgba(34,197,94,0.1)', color: '#4ade80', border: '1px solid rgba(34,197,94,0.2)' }}>
-            <MessageCircle className="h-3.5 w-3.5" /> WhatsApp
+            style={{ background: 'rgba(37,99,235,0.12)', color: '#93c5fd', border: '1px solid rgba(37,99,235,0.25)' }}>
+            <ExternalLink className="h-3.5 w-3.5" /> Painel 2
           </button>
           {(teste.status === 'ativo' || teste.status === 'sem_resposta') && (
             <button

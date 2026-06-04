@@ -10,7 +10,7 @@ import {
 import { useToast } from '@/components/ui/toast'
 import { cn } from '@/lib/utils'
 import type { NavPage } from '@/app/page'
-import { MOCK_TESTES, MOCK_PIPELINE } from '@/lib/mock-data'
+import { MOCK_TESTES, MOCK_PIPELINE, MOCK_CONTAS } from '@/lib/mock-data'
 import type { LeadPipeline } from '@/lib/mock-data'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -214,30 +214,25 @@ function getPaineisCompativeis(app: AppId | ''): ServerId[] {
 // ─── Etapas por tipo de app ───────────────────────────────────────────────────
 
 function getEtapas(app: AppId | ''): { id: string; label: string }[] {
+  // XCloud usa a tela de workers (TelaGerandoXCloud), nao estas etapas.
   if (app === 'xcloud') return [
-    { id: 'acesso',      label: 'Gerando acesso no painel' },
-    { id: 'dispositivo', label: 'Adicionando aparelho no XCloud' },
-    { id: 'xtream',      label: 'Vinculando credenciais Xtream' },
-    { id: 'confirmacao', label: 'Confirmando ativacao' },
-    { id: 'salvando',    label: 'Salvando teste' },
-  ]
-  if (app === 'smartstb') return [
-    { id: 'validando',   label: 'Validando cliente' },
-    { id: 'painel',      label: 'Obtendo DNS do servidor' },
-    { id: 'credenciais', label: 'Gerando usuario e senha' },
-    { id: 'salvando',    label: 'Salvando teste' },
+    { id: 'acesso',      label: 'Gerando acesso' },
+    { id: 'dispositivo', label: 'Adicionando aparelho' },
+    { id: 'validando',   label: 'Validando device' },
+    { id: 'xtream',      label: 'Vinculando Xtream' },
+    { id: 'reload',      label: 'Confirmando RELOAD' },
   ]
   if (app === 'manual') return [
     { id: 'validando', label: 'Validando dados' },
     { id: 'salvando',  label: 'Salvando teste' },
-    { id: 'fim',       label: 'Finalizando' },
+    { id: 'fim',       label: 'Concluido' },
   ]
-  // blessed, playsim, funplay
+  // blessed, playsim, funplay, smartstb — fluxo simples
   return [
-    { id: 'validando',   label: 'Validando cliente' },
-    { id: 'painel',      label: 'Solicitando acesso no painel' },
-    { id: 'credenciais', label: 'Recebendo usuario, senha e codigo' },
+    { id: 'acesso',      label: 'Gerando acesso' },
+    { id: 'credenciais', label: 'Preparando credenciais' },
     { id: 'salvando',    label: 'Salvando teste' },
+    { id: 'fim',         label: 'Concluido' },
   ]
 }
 
@@ -1239,12 +1234,14 @@ function TelaGerando({ form, etapas }: { form: FormData; etapas: EtapaGeracao[] 
 
 // ─── Tela Sucesso ─────────────────────────────────────────────────────────────
 
-function TelaSucesso({ teste, onNovo, onVerTestes, onAtivar, onVerLog }: {
+function TelaSucesso({ teste, onNovo, onVerTestes, onAtivar, onVerLog, onModoManual, onRecriarDevice }: {
   teste: TesteGerado
   onNovo: () => void
   onVerTestes?: () => void
   onAtivar?: () => void
   onVerLog?: () => void
+  onModoManual?: () => void
+  onRecriarDevice?: () => void
 }) {
   const [copied, setCopied] = useState(false)
   const { addToast } = useToast()
@@ -1297,7 +1294,7 @@ function TelaSucesso({ teste, onNovo, onVerTestes, onAtivar, onVerLog }: {
   // Badges de status XCloud
   const xcloudStatus = isXCloud ? [
     { label: 'Acesso gerado',      ok: true },
-    { label: 'Device adicionado',  ok: true },
+    { label: 'Device validada',    ok: true },
     { label: 'Xtream vinculado',   ok: true },
     { label: 'RELOAD confirmado',  ok: true },
   ] : null
@@ -1315,7 +1312,7 @@ function TelaSucesso({ teste, onNovo, onVerTestes, onAtivar, onVerLog }: {
           style={{ background: teste.source === 'supabase' ? 'rgba(34,197,94,0.1)' : 'rgba(245,158,11,0.1)', border: `1px solid ${teste.source === 'supabase' ? 'rgba(34,197,94,0.25)' : 'rgba(245,158,11,0.25)'}` }}>
           <span className="h-1.5 w-1.5 rounded-full" style={{ background: teste.source === 'supabase' ? '#4ade80' : '#fbbf24' }} />
           <span className="text-[11px] font-medium" style={{ color: teste.source === 'supabase' ? '#4ade80' : '#fbbf24' }}>
-            {teste.source === 'supabase' ? 'Registrado no Supabase' : 'Sandbox / Mock'}
+            {teste.source === 'supabase' ? 'Registrado no Supabase' : 'Modo teste'}
           </span>
         </div>
       </motion.div>
@@ -1409,6 +1406,127 @@ function TelaSucesso({ teste, onNovo, onVerTestes, onAtivar, onVerLog }: {
               </button>
             ) : null}
           </motion.div>
+
+          {/* Acoes XCloud — apenas quando XCloud */}
+          {isXCloud && (onModoManual || onRecriarDevice) && (
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.82 }}
+              className="mt-2 grid grid-cols-2 gap-2">
+              {onModoManual && (
+                <button onClick={onModoManual}
+                  className="flex h-10 items-center justify-center gap-1.5 rounded-xl text-xs font-medium transition-all hover:brightness-125"
+                  style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)', color: '#64748b' }}>
+                  <Keyboard className="h-[15px] w-[15px]" />
+                  Modo manual
+                </button>
+              )}
+              {onRecriarDevice && (
+                <button onClick={onRecriarDevice}
+                  className="flex h-10 items-center justify-center gap-1.5 rounded-xl text-xs font-medium transition-all hover:brightness-125"
+                  style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.16)', color: '#fbbf24' }}>
+                  <RefreshCw className="h-[15px] w-[15px]" />
+                  Recriar device
+                </button>
+              )}
+            </motion.div>
+          )}
+        </div>
+      </motion.div>
+    </motion.div>
+  )
+}
+
+// ─── Modal: Confirmar ativacao (cliente pago ocupa tela) ──────────────────────
+
+function AtivarConfirmModal({ teste, onConfirmar, onCancelar }: {
+  teste: TesteGerado
+  onConfirmar: () => void
+  onCancelar: () => void
+}) {
+  const appLabel      = APPS.find(a => a.id === teste.app)?.label ?? teste.app
+  const servidorLabel = SERVIDORES.find(s => s.id === teste.servidor)?.label ?? teste.servidor
+
+  // Conta recomendada: vaga livre no mesmo servidor (preferindo mesmo app)
+  const comVaga = MOCK_CONTAS.filter(c => c.clientesVinculados.length < c.vagasTotal && c.servidor === servidorLabel)
+  const contaRecomendada = comVaga.find(c => c.app === appLabel) ?? comVaga[0] ?? null
+  const telaRecomendada  = contaRecomendada ? contaRecomendada.clientesVinculados.length + 1 : null
+
+  const linhas = [
+    { label: 'Cliente',  value: teste.clientName },
+    { label: 'App',      value: appLabel },
+    { label: 'Painel',   value: servidorLabel },
+    { label: 'Plano',    value: 'A definir na ativacao' },
+    { label: 'Validade', value: teste.validade },
+  ]
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+      style={{ background: 'rgba(7,10,18,0.85)', backdropFilter: 'blur(8px)' }}
+      onClick={onCancelar}
+    >
+      <motion.div
+        initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+        className="w-full max-w-md rounded-2xl overflow-hidden"
+        style={{ background: 'linear-gradient(180deg, #07111F 0%, #0A1728 100%)', border: '1px solid rgba(34,197,94,0.18)' }}
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="p-5 text-center" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+          <div className="h-14 w-14 rounded-full flex items-center justify-center mx-auto mb-3"
+            style={{ background: 'rgba(34,197,94,0.12)', color: '#4ade80', border: '1px solid rgba(34,197,94,0.25)' }}>
+            <Zap className="h-6 w-6" />
+          </div>
+          <h3 className="text-lg font-semibold text-white" style={{ fontFamily: 'var(--font-display)' }}>Ativar cliente pago</h3>
+          <p className="text-xs text-slate-500 mt-1">O teste nao ocupava tela. A ativacao paga ocupa uma tela.</p>
+        </div>
+
+        <div className="p-5 space-y-2">
+          {linhas.map(({ label, value }) => (
+            <div key={label} className="flex items-center justify-between py-1.5" style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+              <span className="text-xs text-slate-500">{label}</span>
+              <span className="text-sm text-slate-200 font-medium">{value}</span>
+            </div>
+          ))}
+
+          {/* Recomendacao de vaga */}
+          <div className="mt-4 rounded-xl p-3.5"
+            style={{
+              background: contaRecomendada ? 'rgba(34,197,94,0.08)' : 'rgba(245,158,11,0.08)',
+              border: `1px solid ${contaRecomendada ? 'rgba(34,197,94,0.2)' : 'rgba(245,158,11,0.2)'}`,
+            }}>
+            {contaRecomendada ? (
+              <>
+                <p className="text-sm font-semibold" style={{ color: '#4ade80' }}>
+                  Melhor opcao: usar vaga livre na conta {contaRecomendada.codigo}
+                </p>
+                <p className="text-[11px] text-slate-400 mt-1">
+                  {contaRecomendada.app} · {contaRecomendada.servidor} · Tela {String(telaRecomendada).padStart(2, '0')} · economiza um novo cadastro
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-sm font-semibold" style={{ color: '#fbbf24' }}>
+                  Nenhuma vaga livre. Sera necessario criar nova conta.
+                </p>
+                <p className="text-[11px] text-slate-400 mt-1">
+                  Sem vagas em {servidorLabel} para {appLabel}.
+                </p>
+              </>
+            )}
+          </div>
+        </div>
+
+        <div className="p-5 flex gap-2" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+          <button onClick={onConfirmar}
+            className="flex-1 h-11 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all"
+            style={{ background: '#22c55e', color: '#06140a' }}>
+            <Check className="h-4 w-4" /> Continuar ativacao
+          </button>
+          <button onClick={onCancelar}
+            className="h-11 px-4 rounded-xl text-sm font-medium flex items-center justify-center"
+            style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', color: '#94a3b8' }}>
+            Cancelar
+          </button>
         </div>
       </motion.div>
     </motion.div>
@@ -1438,6 +1556,7 @@ export function GerarTesteWizard({ onNavigate }: { onNavigate?: (p: NavPage) => 
   const [direction, setDirection] = useState<1 | -1>(1)
   const [mostrarServidores, setMostrarServidores] = useState(false)
   const [modoManualXcloud, setModoManualXcloud] = useState(false)
+  const [confirmandoAtivacao, setConfirmandoAtivacao] = useState(false)
 
   // XCloud workers state
   const WORKERS_INIT: XcloudWorker[] = [
@@ -1454,7 +1573,7 @@ export function GerarTesteWizard({ onNavigate }: { onNavigate?: (p: NavPage) => 
       ],
       subStepAtivo: -1,
     },
-    { id: 'xtream',      label: 'Vinculando XCloud',    subLabel: 'Custom Playlist via Xtream Credentials', status: 'aguardando' },
+    { id: 'xtream',      label: 'Vinculando Xtream',    subLabel: 'Custom Playlist e confirmacao de RELOAD', status: 'aguardando' },
   ]
   const [xcloudWorkers, setXcloudWorkers] = useState<XcloudWorker[]>(WORKERS_INIT)
   const { addToast } = useToast()
@@ -1754,13 +1873,21 @@ export function GerarTesteWizard({ onNavigate }: { onNavigate?: (p: NavPage) => 
             teste={teste}
             onNovo={reset}
             onVerTestes={() => onNavigate?.('testes')}
-            onAtivar={() => {
-              addToast('info', 'Ativacao: verifique vagas livres antes de criar nova conta.')
-              onNavigate?.('clientes')
-            }}
+            onAtivar={() => setConfirmandoAtivacao(true)}
             onVerLog={() => onNavigate?.('debug')}
+            onModoManual={teste.app === 'xcloud' ? () => setModoManualXcloud(true) : undefined}
+            onRecriarDevice={teste.app === 'xcloud' ? () => iniciarGeracao() : undefined}
           />
         </div>
+        <AnimatePresence>
+          {confirmandoAtivacao && (
+            <AtivarConfirmModal
+              teste={teste}
+              onConfirmar={() => { setConfirmandoAtivacao(false); onNavigate?.('contas') }}
+              onCancelar={() => setConfirmandoAtivacao(false)}
+            />
+          )}
+        </AnimatePresence>
       </div>
     )
   }
