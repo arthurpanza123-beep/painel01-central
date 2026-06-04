@@ -10,6 +10,7 @@ import {
 import { useToast } from '@/components/ui/toast'
 import { cn } from '@/lib/utils'
 import type { NavPage } from '@/app/page'
+import { MOCK_TESTES } from '@/lib/mock-data'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1173,32 +1174,64 @@ export function GerarTesteWizard({ onNavigate }: { onNavigate?: (p: NavPage) => 
       try {
         const srv = SERVIDORES.find(s => s.id === form.servidor)
         const payload = {
-          nome: form.nome, telefone: form.telefone,
-          app: form.app, servidor: form.servidor || 'yellow',
-          deviceKey: form.deviceKey || undefined,
+          clientName: form.nome,
+          phone:      form.telefone,
+          app:        form.app,
+          provider:   form.servidor || 'yellow',
+          deviceKey:  form.deviceKey || undefined,
           manualFields: (form.app === 'manual' || form.app === 'smartstb') ? {
-            user: form.manualUser, pass: form.manualPass,
-            code: form.manualCode, host: form.manualHost || srv?.dns,
+            user: form.manualUser,
+            pass: form.manualPass,
+            code: form.manualCode,
+            host: form.manualHost || srv?.dns,
             text: form.manualText,
           } : undefined,
           connection_type: form.app === 'xcloud' ? 'xtream' : 'standard',
         }
         const res = await fetch('/api/tests/create-mock', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         })
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         const data = await res.json()
         if (!data.success) throw new Error(data.error ?? 'Erro desconhecido')
-        return {
-          clientName: form.nome, phone: form.telefone,
-          app: form.app as AppId, servidor: (form.servidor || 'yellow') as ServerId,
-          usuario: data.test.username, senha: data.test.password,
-          codigo: data.test.code, dns: srv?.dns ?? '',
+
+        const resultado: TesteGerado = {
+          clientName: form.nome,
+          phone:      form.telefone,
+          app:        form.app as AppId,
+          servidor:   (form.servidor || 'yellow') as ServerId,
+          usuario:    data.test.username,
+          senha:      data.test.password,
+          codigo:     data.test.code,
+          dns:        data.test.dns ?? srv?.dns ?? '',
           xtreamHost: data.test.xtream_host ?? 'http://srv.centralplay.tv',
-          validade: data.test.validadeBR, mensagem: data.test.mensagem,
-          source: data.source,
+          validade:   data.test.validadeBR,
+          mensagem:   data.test.mensagem,
+          source:     data.source,
         }
+
+        // Adiciona ao MOCK_TESTES para aparecer na aba Testes imediatamente
+        const appLabel = APPS.find(a => a.id === form.app)?.label ?? form.app
+        const srvLabel = SERVIDORES.find(s => s.id === form.servidor)?.label ?? form.servidor
+        const agora    = new Date()
+        MOCK_TESTES.unshift({
+          id:       data.client.id,
+          cliente:  form.nome,
+          telefone: form.telefone,
+          app:      appLabel,
+          servidor: srvLabel,
+          usuario:  data.test.username,
+          senha:    data.test.password,
+          codigo:   data.test.code,
+          status:   'ativo',
+          validade: data.test.validadeBR,
+          criadoEm: agora.toLocaleDateString('pt-BR'),
+          horario:  agora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+        })
+
+        return resultado
       } catch {
         return gerarDadosFakeMock(form)
       }
@@ -1206,6 +1239,32 @@ export function GerarTesteWizard({ onNavigate }: { onNavigate?: (p: NavPage) => 
 
     timers.push(setTimeout(async () => {
       const resultado = await fetchTeste()
+
+      // Se veio do fallback local (erro na API), ainda registra no mock local
+      if (resultado.source === 'mock') {
+        const appLabel = APPS.find(a => a.id === form.app)?.label ?? form.app
+        const srvLabel = SERVIDORES.find(s => s.id === form.servidor)?.label ?? form.servidor
+        const agora    = new Date()
+        // Evitar duplicatas (a API path já inseriu se sucesso)
+        const jaExiste = MOCK_TESTES.some(t => t.cliente === form.nome && t.horario === agora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }))
+        if (!jaExiste) {
+          MOCK_TESTES.unshift({
+            id:       crypto.randomUUID(),
+            cliente:  form.nome,
+            telefone: form.telefone,
+            app:      appLabel,
+            servidor: srvLabel,
+            usuario:  resultado.usuario,
+            senha:    resultado.senha,
+            codigo:   resultado.codigo,
+            status:   'ativo',
+            validade: resultado.validade,
+            criadoEm: agora.toLocaleDateString('pt-BR'),
+            horario:  agora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+          })
+        }
+      }
+
       setTeste(resultado)
       setProcessStep('sucesso')
     }, minDelay))
