@@ -28,6 +28,8 @@ interface TesteGerado {
   senha: string
   validade: string
   mensagem: string
+  /** Indica de onde vieram os dados: gravou no Supabase ou apenas mock local */
+  source: 'supabase' | 'mock'
 }
 
 // ----------------------------------------------------------------
@@ -134,7 +136,7 @@ function gerarDadosFake(form: FormData): TesteGerado {
   const appLabel = APPS.find((a) => a.id === form.app)?.label ?? form.app
   const servidorLabel = SERVIDORES.find((s) => s.id === form.servidor)?.label ?? form.servidor
   const mensagem = `Olá ${form.nome}! Segue seu teste de 2 horas:\n\nAplicativo: ${appLabel}\nServidor: ${servidorLabel}\nUsuário: ${usuario}\nSenha: ${senha}\nCódigo: ${codigo}\nValidade: ${validade}\n\nQualquer dúvida é só chamar!`
-  return { codigo, usuario, senha, validade, mensagem }
+  return { codigo, usuario, senha, validade, mensagem, source: 'mock' }
 }
 
 // ----------------------------------------------------------------
@@ -300,6 +302,8 @@ export function GerarTesteWizard() {
     if (processStep !== 'gerando') return
     setEtapaAtual(0)
     setEtapasFeitas(new Set())
+
+    // Avança as etapas visuais da animação independente do fetch
     const timers: ReturnType<typeof setTimeout>[] = []
     ETAPAS_GERACAO.forEach((_, i) => {
       timers.push(setTimeout(() => {
@@ -307,10 +311,47 @@ export function GerarTesteWizard() {
         setEtapasFeitas((prev) => new Set([...prev, i]))
       }, i * 650))
     })
-    timers.push(setTimeout(() => {
-      setTeste(gerarDadosFake(form))
+
+    // Chama o endpoint — aguarda o tempo mínimo da animação
+    const minDelay = ETAPAS_GERACAO.length * 650 + 400
+    const fetchTeste = async (): Promise<TesteGerado> => {
+      try {
+        const res = await fetch('/api/tests/create-mock', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            nome:     form.nome,
+            telefone: form.telefone,
+            app:      form.app,
+            servidor: form.servidor,
+          }),
+        })
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const data = await res.json()
+        if (!data.success) throw new Error(data.error ?? 'Erro desconhecido')
+        return {
+          codigo:   data.test.code,
+          usuario:  data.test.username,   // já mascarado pela API
+          senha:    data.test.password,   // já mascarado pela API
+          validade: data.test.validadeBR,
+          mensagem: data.test.mensagem,
+          source:   data.source,
+        }
+      } catch (err) {
+        // Fallback local — nunca chama API externa
+        console.error('[wizard] Fallback para geração local:', err)
+        const result = gerarDadosFake(form)
+        return { ...result, source: 'mock' as const }
+      }
+    }
+
+    // Aguarda o mínimo da animação antes de exibir sucesso
+    timers.push(setTimeout(async () => {
+      const resultado = await fetchTeste()
+      setTeste(resultado)
       setProcessStep('sucesso')
-    }, ETAPAS_GERACAO.length * 650 + 400))
+    }, minDelay))
+
     return () => timers.forEach(clearTimeout)
   }, [processStep, form])
 
@@ -1035,6 +1076,20 @@ function TelaSucesso({
         <p className="mt-1 text-sm text-muted-foreground">
           Pronto para enviar para {form.nome}
         </p>
+        {/* Badge indicando se foi gravado no Supabase ou só em memória */}
+        <div className="mt-3 inline-flex items-center gap-1.5 rounded-full px-3 py-1" style={{
+          background: teste.source === 'supabase' ? 'rgba(34,197,94,0.1)' : 'rgba(245,158,11,0.1)',
+          border: `1px solid ${teste.source === 'supabase' ? 'rgba(34,197,94,0.25)' : 'rgba(245,158,11,0.25)'}`,
+        }}>
+          <span className="h-1.5 w-1.5 rounded-full" style={{
+            background: teste.source === 'supabase' ? '#4ade80' : '#fbbf24',
+          }} />
+          <span className="text-[11px] font-medium" style={{
+            color: teste.source === 'supabase' ? '#4ade80' : '#fbbf24',
+          }}>
+            {teste.source === 'supabase' ? 'Gravado no Supabase' : 'Modo mock (sem banco)'}
+          </span>
+        </div>
       </motion.div>
 
       <motion.div
