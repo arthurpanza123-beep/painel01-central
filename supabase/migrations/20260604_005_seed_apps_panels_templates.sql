@@ -47,9 +47,6 @@ insert into public.panels (
   ('uniplay', 'Uniplay', 'api', null, 'env_url', 'UNIPLAY_FUNPLAY_URL', array['UNIPLAY_FUNPLAY_URL'], array['funplay'], 'enabled', '{"public_code":"00112"}'::jsonb),
   ('devxtop_magic', 'DevXTop / Magic', 'api', null, 'env_url', 'DEVXTOP_MAGIC_URL', array['DEVXTOP_MAGIC_URL'], array['magic'], 'enabled', '{"notes":"Magic product remains possible; generation can stay disabled until confirmed."}'::jsonb),
   ('xcloud_playwright', 'XCloud Playwright', 'playwright', null, 'panel_login', 'XCLOUD_PANEL_CREDENTIALS', array['XCLOUD_PANEL_URL','XCLOUD_EMAIL','XCLOUD_PASSWORD'], array['xcloud'], 'enabled', '{"storage":"browser profile outside database"}'::jsonb),
-  ('evolution_api', 'Evolution API', 'whatsapp', null, 'api_key', 'EVOLUTION_API_KEY', array['EVOLUTION_BASE_URL','EVOLUTION_INSTANCE','EVOLUTION_API_KEY'], array[]::text[], 'enabled', '{"channel":"whatsapp"}'::jsonb),
-  ('telegram', 'Telegram', 'telegram', null, 'bot_token', 'TELEGRAM_BOT_TOKEN', array['TELEGRAM_BOT_TOKEN'], array[]::text[], 'enabled', '{"channel":"telegram"}'::jsonb),
-  ('meta_capi', 'Meta CAPI', 'analytics', null, 'access_token', 'META_CAPI_ACCESS_TOKEN', array['META_DATASET_ID','META_CAPI_ACCESS_TOKEN'], array[]::text[], 'enabled', '{"event":"Purchase"}'::jsonb),
   ('titanium', 'Titanium', 'api', null, 'env_url', null, array[]::text[], array['hdplayer'], 'disabled', '{"legacy":true}'::jsonb),
   ('areaplay', 'AreaPlay', 'api', null, 'env_url', null, array[]::text[], array['xcloud'], 'disabled', '{"legacy":true}'::jsonb),
   ('cinemax', 'CineMax', 'api', null, 'env_url', null, array[]::text[], array['blessed','playsim','assist_plus','funplay'], 'disabled', '{"legacy":true}'::jsonb)

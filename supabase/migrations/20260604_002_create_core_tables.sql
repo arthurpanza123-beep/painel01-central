@@ -79,6 +79,24 @@ create table if not exists public.integrations (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists public.panel_credit_snapshots (
+  id uuid primary key default gen_random_uuid(),
+  panel_id uuid not null references public.panels(id) on delete cascade,
+  integration_id uuid references public.integrations(id) on delete set null,
+  balance_label text,
+  credits_available numeric,
+  estimated_activations integer,
+  cost_per_activation_cents integer,
+  currency text not null default 'BRL',
+  status text not null default 'ok',
+  checked_at timestamptz not null default now(),
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+
+comment on table public.panel_credit_snapshots is
+  'Historical/latest credit snapshots for generation panels, used by Financeiro and Dashboard.';
+
 create table if not exists public.templates (
   id uuid primary key default gen_random_uuid(),
   key text not null,

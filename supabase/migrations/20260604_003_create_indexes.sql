@@ -21,6 +21,11 @@ create index if not exists idx_integrations_key on public.integrations (key);
 create index if not exists idx_integrations_type on public.integrations (type);
 create index if not exists idx_integrations_status on public.integrations (status);
 
+create index if not exists idx_panel_credit_snapshots_panel_id on public.panel_credit_snapshots (panel_id);
+create index if not exists idx_panel_credit_snapshots_integration_id on public.panel_credit_snapshots (integration_id);
+create index if not exists idx_panel_credit_snapshots_checked_at on public.panel_credit_snapshots (checked_at desc);
+create index if not exists idx_panel_credit_snapshots_status on public.panel_credit_snapshots (status);
+
 create index if not exists idx_templates_key on public.templates (key);
 create index if not exists idx_templates_channel on public.templates (channel);
 create index if not exists idx_templates_category on public.templates (category);

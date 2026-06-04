@@ -18,6 +18,7 @@ alter table public.renewals enable row level security;
 alter table public.payments enable row level security;
 alter table public.problems enable row level security;
 alter table public.integrations enable row level security;
+alter table public.panel_credit_snapshots enable row level security;
 alter table public.logs enable row level security;
 alter table public.messages enable row level security;
 alter table public.pipeline_events enable row level security;
@@ -39,6 +40,7 @@ begin
     'payments',
     'problems',
     'integrations',
+    'panel_credit_snapshots',
     'logs',
     'messages',
     'pipeline_events',
