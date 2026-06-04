@@ -243,23 +243,25 @@ export async function POST(req: NextRequest) {
     mensagem = manualFields.text.trim()
   } else if (isXCloud) {
     mensagem = [
-      `Olá ${clientName.trim()}! Segue seu teste de 2 horas:`,
+      `Teste ativado com sucesso!`,
       ``,
-      `App: XCloud`,
+      `Olá ${clientName.trim()}! Segue seu acesso XCloud:`,
+      ``,
       `Host: ${finalHost}`,
       `Usuário: ${finalUsuario}`,
       `Senha: ${finalSenha}`,
       `Validade: ${cred.validadeBR}`,
       ``,
-      ...(finalDeviceKey ? [`Chave do dispositivo: ${finalDeviceKey}`] : []),
-      ``,
+      ...(finalDeviceKey ? [`Chave do dispositivo: ${finalDeviceKey}`, ``] : []),
+      `Abra o app e clique em RELOAD ou RECARREGAR para ativar.`,
       `Qualquer dúvida é só chamar!`,
-    ].filter(Boolean).join('\n')
+    ].filter(s => s !== undefined).join('\n')
   } else if (isSmartStb) {
     mensagem = [
-      `Olá ${clientName.trim()}! Segue seu teste de 2 horas:`,
+      `Teste ativado com sucesso!`,
       ``,
-      `App: Smart STB`,
+      `Olá ${clientName.trim()}! Segue seu acesso Smart STB:`,
+      ``,
       `Servidor: ${srvLabel}`,
       `DNS: ${panelDns}`,
       `Usuário: ${finalUsuario}`,
@@ -270,7 +272,7 @@ export async function POST(req: NextRequest) {
     ].join('\n')
   } else if (isManual) {
     mensagem = [
-      `Olá ${clientName.trim()}! Segue seu acesso:`,
+      `Teste ativado com sucesso!`,
       ``,
       ...(finalHost ? [`Host: ${finalHost}`] : []),
       `Usuário: ${finalUsuario}`,
@@ -282,9 +284,10 @@ export async function POST(req: NextRequest) {
     ].join('\n')
   } else {
     mensagem = [
-      `Olá ${clientName.trim()}! Segue seu teste de 2 horas:`,
+      `Teste ativado com sucesso!`,
       ``,
-      `App: ${appLabel}`,
+      `Olá ${clientName.trim()}! Segue seu acesso ${appLabel}:`,
+      ``,
       `Servidor: ${srvLabel}`,
       `Código: ${finalCodigo}`,
       `Usuário: ${finalUsuario}`,

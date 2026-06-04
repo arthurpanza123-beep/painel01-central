@@ -10,7 +10,8 @@ import {
 import { useToast } from '@/components/ui/toast'
 import { cn } from '@/lib/utils'
 import type { NavPage } from '@/app/page'
-import { MOCK_TESTES } from '@/lib/mock-data'
+import { MOCK_TESTES, MOCK_PIPELINE } from '@/lib/mock-data'
+import type { LeadPipeline } from '@/lib/mock-data'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -38,6 +39,7 @@ interface TesteGerado {
   phone: string
   app: AppId
   servidor: ServerId | ''
+  pedido: string           // ID do teste (pedido)
   usuario: string
   senha: string
   codigo: string
@@ -248,9 +250,10 @@ function gerarDadosFakeMock(form: FormData): TesteGerado {
       ``,
       `Qualquer dúvida é só chamar!`,
     ].join('\n')
-    return { clientName: nome, phone: form.telefone, app: appId, servidor: srvId, usuario, senha, codigo, dns: '', xtreamHost: host, validade: valBR, mensagem, source: 'mock' }
+    return { clientName: nome, phone: form.telefone, app: appId, servidor: srvId, pedido: `#${Math.floor(Math.random()*9000)+1000}`, usuario, senha, codigo, dns: '', xtreamHost: host, validade: valBR, mensagem, source: 'mock' }
   }
 
+  const pedidoFake = `#${String(Math.floor(Math.random() * 9000) + 1000)}`
   const usuario   = `usr_${nome.split(' ')[0].toLowerCase().replace(/[^a-z]/g, '')}${Math.floor(Math.random() * 999)}`
   const senha     = `${rand(5)}${rand(5)}`.substring(0, 10)
   const codigo    = `#${String(Math.floor(Math.random() * 9000) + 1000)}`
@@ -264,23 +267,26 @@ function gerarDadosFakeMock(form: FormData): TesteGerado {
   let mensagem = ''
   if (appId === 'xcloud') {
     mensagem = [
-      `Olá ${nome}! Segue seu teste de 2 horas:`,
+      `Teste ativado com sucesso!`,
       ``,
-      `App: ${appLabel}`,
+      `Olá ${nome}! Segue seu acesso XCloud:`,
+      ``,
       `Host: ${host}`,
       `Usuário: ${usuario}`,
       `Senha: ${senha}`,
       `Validade: ${valBR}`,
       ``,
-      `Informe a chave do seu dispositivo: ${deviceKey}`,
+      `Chave do dispositivo: ${deviceKey}`,
       ``,
+      `Abra o app e clique em RELOAD ou RECARREGAR para ativar.`,
       `Qualquer dúvida é só chamar!`,
     ].join('\n')
   } else if (appId === 'smartstb') {
     mensagem = [
-      `Olá ${nome}! Segue seu teste de 2 horas:`,
+      `Teste ativado com sucesso!`,
       ``,
-      `App: Smart STB`,
+      `Olá ${nome}! Segue seu acesso Smart STB:`,
+      ``,
       `Servidor: ${srvLabel}`,
       `DNS: ${dns}`,
       `Usuário: ${usuario}`,
@@ -291,9 +297,10 @@ function gerarDadosFakeMock(form: FormData): TesteGerado {
     ].join('\n')
   } else {
     mensagem = [
-      `Olá ${nome}! Segue seu teste de 2 horas:`,
+      `Teste ativado com sucesso!`,
       ``,
-      `App: ${appLabel}`,
+      `Olá ${nome}! Segue seu acesso ${appLabel}:`,
+      ``,
       `Servidor: ${srvLabel}`,
       `Código: ${codigo}`,
       `Usuário: ${usuario}`,
@@ -304,7 +311,7 @@ function gerarDadosFakeMock(form: FormData): TesteGerado {
     ].join('\n')
   }
 
-  return { clientName: nome, phone: form.telefone, app: appId, servidor: srvId, usuario, senha, codigo, dns, xtreamHost: host, validade: valBR, mensagem, source: 'mock' }
+  return { clientName: nome, phone: form.telefone, app: appId, servidor: srvId, pedido: pedidoFake, usuario, senha, codigo, dns, xtreamHost: host, validade: valBR, mensagem, source: 'mock' }
 }
 
 // ─── Particles ────────────────────────────────────────────────────────────────
@@ -994,8 +1001,9 @@ function TelaSucesso({ teste, onNovo, onVerTestes }: {
   const campos = [
     { label: 'Cliente',    value: teste.clientName },
     { label: 'Telefone',   value: teste.phone },
+    { label: 'Pedido',     value: teste.pedido },
     { label: 'Aplicativo', value: appSelecionado?.label ?? teste.app },
-    ...(!isManual && servidorSelecionado ? [{ label: 'Servidor', value: servidorSelecionado.label }] : []),
+    ...(!isManual && servidorSelecionado ? [{ label: 'Painel', value: servidorSelecionado.label }] : []),
     ...(isSmartStb ? [{ label: 'DNS', value: teste.dns }] : []),
     ...(isXCloud   ? [{ label: 'Host Xtream', value: teste.xtreamHost }] : []),
     ...(!isXCloud && !isManual ? [{ label: 'Código', value: teste.codigo }] : []),
@@ -1046,34 +1054,39 @@ function TelaSucesso({ teste, onNovo, onVerTestes }: {
             <pre className="whitespace-pre-wrap font-sans text-xs leading-relaxed text-slate-400">{teste.mensagem}</pre>
           </motion.div>
 
-          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.7 }} className="grid grid-cols-2 gap-2.5">
-            <button onClick={copiar}
-              className="flex h-12 items-center justify-center gap-2 rounded-xl text-sm font-medium transition-all hover:bg-white/[0.07]"
-              style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', color: '#94a3b8' }}>
-              {copied ? <CheckCircle className="h-[18px] w-[18px] text-emerald-400" /> : <Copy className="h-[18px] w-[18px]" />}
-              {copied ? 'Copiado!' : 'Copiar mensagem'}
-            </button>
+          {/* CTA Principal — Enviar para cliente */}
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.65 }} className="mb-3">
             <button onClick={abrirWhatsApp}
-              className="flex h-12 items-center justify-center gap-2 rounded-xl text-sm font-bold text-white transition-all"
-              style={{ background: 'linear-gradient(135deg, #22c55e, #16a34a)', boxShadow: '0 4px 20px rgba(34,197,94,0.35)' }}>
-              <MessageCircle className="h-[18px] w-[18px]" />
-              Abrir WhatsApp
+              className="relative w-full overflow-hidden flex h-14 items-center justify-center gap-2.5 rounded-xl text-base font-bold text-white transition-all"
+              style={{ background: 'linear-gradient(135deg, #22c55e 0%, #16a34a 50%, #15803d 100%)', boxShadow: '0 0 0 1px rgba(34,197,94,0.3), 0 8px 32px rgba(34,197,94,0.45), inset 0 1px 0 rgba(255,255,255,0.15)', fontFamily: 'var(--font-display)' }}>
+              <span className="pointer-events-none absolute inset-y-0 left-[-75%] w-1/2 skew-x-[-20deg]"
+                style={{ background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.12), transparent)', animation: 'shineSweep 3.5s ease-in-out infinite' }} />
+              <MessageCircle className="h-5 w-5 relative" />
+              <span className="relative">Enviar para cliente</span>
+              <span className="relative text-xs font-normal opacity-70 ml-0.5">via WhatsApp</span>
             </button>
           </motion.div>
 
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.8 }} className="mt-3 grid grid-cols-2 gap-2.5">
+          {/* Ações secundárias */}
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.75 }} className="grid grid-cols-3 gap-2">
+            <button onClick={copiar}
+              className="flex h-11 items-center justify-center gap-1.5 rounded-xl text-sm font-medium transition-all hover:bg-white/[0.07]"
+              style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', color: '#94a3b8' }}>
+              {copied ? <CheckCircle className="h-[17px] w-[17px] text-emerald-400" /> : <Copy className="h-[17px] w-[17px]" />}
+              {copied ? 'Copiado' : 'Copiar'}
+            </button>
             <button onClick={onNovo}
-              className="flex h-11 items-center justify-center gap-2 rounded-xl text-sm font-medium transition-all hover:bg-white/[0.05]"
+              className="flex h-11 items-center justify-center gap-1.5 rounded-xl text-sm font-medium transition-all hover:bg-white/[0.05]"
               style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)', color: '#64748b' }}>
-              <RotateCcw className="h-[18px] w-[18px]" />
-              Novo teste
+              <RotateCcw className="h-[17px] w-[17px]" />
+              Novo
             </button>
             {onVerTestes && (
               <button onClick={onVerTestes}
-                className="flex h-11 items-center justify-center gap-2 rounded-xl text-sm font-medium transition-all hover:bg-white/[0.05]"
+                className="flex h-11 items-center justify-center gap-1.5 rounded-xl text-sm font-medium transition-all hover:bg-white/[0.05]"
                 style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)', color: '#64748b' }}>
-                <ExternalLink className="h-[18px] w-[18px]" />
-                Ver em Testes
+                <ExternalLink className="h-[17px] w-[17px]" />
+                Ver testes
               </button>
             )}
           </motion.div>
@@ -1205,6 +1218,7 @@ export function GerarTesteWizard({ onNavigate }: { onNavigate?: (p: NavPage) => 
           usuario:    data.test.username,
           senha:      data.test.password,
           codigo:     data.test.code,
+          pedido:     data.test.id,
           dns:        data.test.dns ?? srv?.dns ?? '',
           xtreamHost: data.test.xtream_host ?? 'http://srv.centralplay.tv',
           validade:   data.test.validadeBR,
@@ -1212,7 +1226,7 @@ export function GerarTesteWizard({ onNavigate }: { onNavigate?: (p: NavPage) => 
           source:     data.source,
         }
 
-        // Adiciona ao MOCK_TESTES para aparecer na aba Testes imediatamente
+        // Insere no MOCK_TESTES para aparecer na aba imediatamente
         const appLabel = APPS.find(a => a.id === form.app)?.label ?? form.app
         const srvLabel = SERVIDORES.find(s => s.id === form.servidor)?.label ?? form.servidor
         const agora    = new Date()
@@ -1231,6 +1245,20 @@ export function GerarTesteWizard({ onNavigate }: { onNavigate?: (p: NavPage) => 
           horario:  agora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
         })
 
+        // Insere no MOCK_PIPELINE na etapa "teste_gerado"
+        const novoLead: LeadPipeline = {
+          id:          data.client.id,
+          nome:        form.nome,
+          telefone:    form.telefone,
+          app:         appLabel,
+          servidor:    srvLabel,
+          etapa:       'teste_gerado',
+          criadoEm:    agora.toLocaleString('pt-BR'),
+          atualizadoEm: agora.toLocaleString('pt-BR'),
+          testeId:     data.test.id,
+        }
+        MOCK_PIPELINE.unshift(novoLead)
+
         return resultado
       } catch {
         return gerarDadosFakeMock(form)
@@ -1240,16 +1268,17 @@ export function GerarTesteWizard({ onNavigate }: { onNavigate?: (p: NavPage) => 
     timers.push(setTimeout(async () => {
       const resultado = await fetchTeste()
 
-      // Se veio do fallback local (erro na API), ainda registra no mock local
+      // Fallback: inserir no mock local quando API falhou
       if (resultado.source === 'mock') {
         const appLabel = APPS.find(a => a.id === form.app)?.label ?? form.app
         const srvLabel = SERVIDORES.find(s => s.id === form.servidor)?.label ?? form.servidor
         const agora    = new Date()
-        // Evitar duplicatas (a API path já inseriu se sucesso)
-        const jaExiste = MOCK_TESTES.some(t => t.cliente === form.nome && t.horario === agora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }))
+        const horario  = agora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+        const jaExiste = MOCK_TESTES.some(t => t.cliente === form.nome && t.horario === horario)
         if (!jaExiste) {
+          const novoId = crypto.randomUUID()
           MOCK_TESTES.unshift({
-            id:       crypto.randomUUID(),
+            id:       novoId,
             cliente:  form.nome,
             telefone: form.telefone,
             app:      appLabel,
@@ -1260,7 +1289,17 @@ export function GerarTesteWizard({ onNavigate }: { onNavigate?: (p: NavPage) => 
             status:   'ativo',
             validade: resultado.validade,
             criadoEm: agora.toLocaleDateString('pt-BR'),
-            horario:  agora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+            horario,
+          })
+          MOCK_PIPELINE.unshift({
+            id:           novoId,
+            nome:         form.nome,
+            telefone:     form.telefone,
+            app:          appLabel,
+            servidor:     srvLabel,
+            etapa:        'teste_gerado',
+            criadoEm:     agora.toLocaleString('pt-BR'),
+            atualizadoEm: agora.toLocaleString('pt-BR'),
           })
         }
       }
