@@ -333,11 +333,10 @@ export function ProblemasPage() {
           <CodexModal
             problema={codexTarget}
             onClose={() => setCodexTarget(null)}
-            onSend={(obs) => {
-              console.log('[v0] Codex contexto enviado', { problema: codexTarget.id, obs })
-              addToast('success', 'Contexto enviado ao Codex')
-              setCodexTarget(null)
-            }}
+              onSend={(_obs) => {
+                addToast('success', 'Contexto enviado ao Codex')
+                setCodexTarget(null)
+              }}
           />
         )}
       </AnimatePresence>

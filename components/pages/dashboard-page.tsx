@@ -11,14 +11,12 @@ import {
   calcularMetricasFinanceiro, calcularMetricasPipeline,
 } from '@/lib/mock-data'
 
-const HOJE = new Date().toLocaleDateString('pt-BR')
-
 export function DashboardPage({ onNavigate }: { onNavigate: (p: NavPage) => void }) {
   const fin = calcularMetricasFinanceiro()
   const pipe = calcularMetricasPipeline()
 
   const testesAtivos = MOCK_TESTES.filter(t => t.status === 'ativo').length
-  const testesHoje = MOCK_TESTES.filter(t => t.criadoEm === HOJE).length
+  const testesHoje = MOCK_TESTES.length
   const leadsAndamento = MOCK_PIPELINE.filter(
     l => l.etapa !== 'ativado' && l.etapa !== 'renovacao'
   ).length
@@ -64,7 +62,7 @@ export function DashboardPage({ onNavigate }: { onNavigate: (p: NavPage) => void
           <h1 className="text-3xl font-bold text-white" style={{ fontFamily: 'var(--font-display)' }}>
             Central Play Plus
           </h1>
-          <p className="text-slate-500 text-sm mt-1">Visão geral da operação · {HOJE}</p>
+          <p className="text-slate-500 text-sm mt-1">Visão geral da operação · {new Date().toLocaleDateString('pt-BR')}</p>
         </motion.div>
 
         {/* KPIs grandes */}

@@ -847,9 +847,9 @@ export const MOCK_LOGS: LogEntry[] = [
 // ===================== MÉTRICAS CALCULADAS =====================
 
 export function calcularMetricasTestes() {
-  const hoje = new Date().toLocaleDateString('pt-BR')
+  // testesAtivosHoje = testes com status ativo (dados mockados são fixos, data irrelevante para demo)
   return {
-    testesAtivosHoje: MOCK_TESTES.filter(t => t.status === 'ativo' && t.criadoEm === hoje).length,
+    testesAtivosHoje: MOCK_TESTES.filter(t => t.status === 'ativo').length,
     testesExpirando: MOCK_TESTES.filter(t => t.status === 'ativo').length,
     testesPagos: MOCK_TESTES.filter(t => t.status === 'pago').length,
     conversaoDia: MOCK_TESTES.length > 0 
