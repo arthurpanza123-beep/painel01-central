@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   ArrowRight, ArrowLeft, Copy, MessageCircle, CheckCircle,
   RotateCcw, ExternalLink, Loader2, AlertCircle, Check,
-  ChevronDown, Keyboard
+  Keyboard
 } from 'lucide-react'
 import { useToast } from '@/components/ui/toast'
 import { cn } from '@/lib/utils'
@@ -16,7 +16,7 @@ import type { NavPage } from '@/app/page'
 type WizardStep = 'dados' | 'app' | 'servidor' | 'extra'
 type ProcessStep = 'gerando' | 'sucesso'
 type AppId = 'xcloud' | 'blessed' | 'playsim' | 'smartstb' | 'manual'
-type ServerId = 'yellow' | 'ninety'
+type ServerId = 'yellow' | 'ninety' | 'cinemax'
 type EtapaStatus = 'aguardando' | 'carregando' | 'concluido' | 'erro'
 
 interface FormData {
@@ -66,7 +66,7 @@ const APPS: {
   {
     id: 'xcloud',
     label: 'XCloud',
-    desc: 'App principal',
+    desc: 'Xtream + chave de dispositivo',
     badge: 'PREMIUM',
     badgeColor: '#14b8a6',
     color: '#14b8a6',
@@ -84,7 +84,7 @@ const APPS: {
   {
     id: 'playsim',
     label: 'PlaySim',
-    desc: 'Alternativo',
+    desc: 'Leve e rápido',
     badge: 'LEVE',
     badgeColor: '#f97316',
     color: '#f97316',
@@ -101,8 +101,8 @@ const APPS: {
   },
   {
     id: 'manual',
-    label: 'Manual',
-    desc: 'Gerar texto de acesso',
+    label: 'Gerar teste manual',
+    desc: 'Preencha os dados livremente',
     badge: 'LIVRE',
     badgeColor: '#64748b',
     color: '#64748b',
@@ -119,24 +119,56 @@ const SERVIDORES: {
   destaque: boolean
   color: string
   image: string
+  creditos: number   // mockado
+  telas: number      // conexões por conta
 }[] = [
   {
     id: 'yellow',
     label: 'Yellow Box',
-    sub: 'Principal',
+    sub: 'Painel principal · 2 telas',
     destaque: true,
     color: '#84cc16',
     image: 'https://hebbkx1anhila5yf.public.blob.vercel-storage.com/4f976bbd-b9a0-4464-9345-faab1188d991-GeKdgGIvSt1FeZn9dfhIMTy2s92JaX.png',
+    creditos: 10,
+    telas: 2,
   },
   {
     id: 'ninety',
     label: 'Ninety',
-    sub: 'Secundário',
+    sub: 'Painel secundário · 1 tela',
     destaque: false,
     color: '#a855f7',
     image: 'https://hebbkx1anhila5yf.public.blob.vercel-storage.com/a8543a86-94bc-4402-80d8-b537ec48807f-keJkJzA3chubyxn9bwE7Wg1JEytlwW.png',
+    creditos: 5.5,
+    telas: 1,
+  },
+  {
+    id: 'cinemax',
+    label: 'CineMax',
+    sub: 'Painel auxiliar · 2 telas',
+    destaque: false,
+    color: '#f59e0b',
+    image: 'https://hebbkx1anhila5yf.public.blob.vercel-storage.com/4f976bbd-b9a0-4464-9345-faab1188d991-GeKdgGIvSt1FeZn9dfhIMTy2s92JaX.png',
+    creditos: 4,
+    telas: 2,
   },
 ]
+
+// ─── Regras de compatibilidade app × painel ───────────────────────────────────
+// Teste NÃO ocupa tela. Tela só é usada na ativação de cliente pago.
+
+const PAINEIS_POR_APP: Record<AppId, ServerId[]> = {
+  xcloud:   ['yellow', 'ninety', 'cinemax'],
+  blessed:  ['yellow'],
+  playsim:  ['yellow', 'cinemax'],
+  smartstb: [],   // painel não configurado → vai para manual
+  manual:   [],   // não usa painel real
+}
+
+function getPaineisCompativeis(app: AppId | ''): ServerId[] {
+  if (!app) return []
+  return PAINEIS_POR_APP[app] ?? []
+}
 
 // ─── Etapas por tipo de app ───────────────────────────────────────────────────
 
@@ -438,17 +470,60 @@ function StepApp({ form, setForm, onNext, onBack }: {
 function StepServidor({ form, setForm, onNext, onBack }: {
   form: FormData; setForm: (f: FormData) => void; onNext: () => void; onBack: () => void
 }) {
-  const [mostrarOutros, setMostrarOutros] = useState(false)
-  const visíveis = mostrarOutros ? SERVIDORES : SERVIDORES.filter(s => s.destaque || s.id === 'ninety')
+  // Filtra apenas painéis compatíveis com o app escolhido
+  const compatíveis = getPaineisCompativeis(form.app)
+  const paineis = SERVIDORES.filter(s => compatíveis.includes(s.id))
+
+  // Smart STB e manual não têm painel — redireciona para extra
+  if (form.app === 'smartstb' || form.app === 'manual' || paineis.length === 0) {
+    return (
+      <motion.div initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -40 }}>
+        <div className="text-center mb-8">
+          <h2 className="text-xl font-bold text-white mb-1" style={{ fontFamily: 'var(--font-display)' }}>Painel não configurado</h2>
+          <p className="text-sm text-slate-500">
+            {form.app === 'smartstb'
+              ? 'Smart STB ainda não tem painel integrado. Gerar manualmente.'
+              : 'Este app não requer seleção de painel.'}
+          </p>
+        </div>
+        <div className="flex gap-3 max-w-sm mx-auto">
+          <button
+            onClick={onBack}
+            className="h-11 px-4 rounded-xl text-sm font-medium flex items-center gap-1.5 transition-all"
+            style={{ background: 'rgba(255,255,255,0.05)', color: '#64748b', border: '1px solid rgba(255,255,255,0.07)' }}
+          >
+            <ArrowLeft className="h-4 w-4" /> Voltar
+          </button>
+          <button
+            onClick={onNext}
+            className="flex-1 h-11 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all"
+            style={{ background: 'linear-gradient(135deg, #2563eb, #1d4ed8)', color: '#fff' }}
+          >
+            Preencher dados <ArrowRight className="h-4 w-4" />
+          </button>
+        </div>
+      </motion.div>
+    )
+  }
 
   return (
     <motion.div initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -40 }}>
-      <div className="text-center mb-8">
+      <div className="text-center mb-6">
         <h2 className="text-xl font-bold text-white mb-1" style={{ fontFamily: 'var(--font-display)' }}>Escolha o servidor</h2>
         <p className="text-sm text-slate-500">Qual painel vai fornecer o teste?</p>
       </div>
-      <div className="flex flex-col sm:flex-row gap-4 max-w-md mx-auto mb-6">
-        {visíveis.map(srv => {
+
+      {/* Aviso fixo */}
+      <div className="flex items-center gap-2 rounded-xl px-4 py-2.5 mb-5 max-w-md mx-auto"
+        style={{ background: 'rgba(245,158,11,0.07)', border: '1px solid rgba(245,158,11,0.15)' }}>
+        <span className="h-1.5 w-1.5 rounded-full shrink-0" style={{ background: '#f59e0b' }} />
+        <p className="text-[11px] text-amber-400/80">
+          Teste <strong>não ocupa tela.</strong> A tela só será usada na ativação do cliente.
+        </p>
+      </div>
+
+      <div className="flex flex-col sm:flex-row gap-3 max-w-lg mx-auto mb-5">
+        {paineis.map(srv => {
           const selected = form.servidor === srv.id
           return (
             <button
@@ -465,29 +540,34 @@ function StepServidor({ form, setForm, onNext, onBack }: {
               }}
             >
               {srv.destaque && (
-                <span className="absolute top-2.5 right-2.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: '#84cc1620', color: '#84cc16' }}>
+                <span className="absolute top-2.5 right-2.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full"
+                  style={{ background: '#84cc1620', color: '#84cc16' }}>
                   PRINCIPAL
                 </span>
               )}
-              <img src={srv.image} alt={srv.label} className="h-14 w-14 object-contain rounded-2xl" />
+              <img src={srv.image} alt={srv.label} className="h-12 w-12 object-contain rounded-2xl" />
               <div className="text-center">
                 <p className="text-sm font-semibold text-white">{srv.label}</p>
                 <p className="text-[11px] mt-0.5" style={{ color: srv.color }}>{srv.sub}</p>
+              </div>
+              {/* Créditos mockados */}
+              <div className="flex items-center gap-1.5 rounded-lg px-3 py-1"
+                style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                <span className="text-[10px] text-slate-500">Créditos:</span>
+                <span className="text-[10px] font-semibold" style={{
+                  color: srv.creditos < 3 ? '#f87171' : srv.creditos < 6 ? '#fbbf24' : '#4ade80',
+                }}>
+                  {srv.creditos}
+                </span>
               </div>
             </button>
           )
         })}
       </div>
-      <div className="flex flex-col items-center gap-3">
-        {!mostrarOutros && (
-          <button
-            onClick={() => setMostrarOutros(true)}
-            className="flex items-center gap-1 text-xs text-slate-600 hover:text-slate-400 transition-colors"
-          >
-            Ver outros servidores <ChevronDown className="h-3.5 w-3.5" />
-          </button>
-        )}
-        <button onClick={onBack} className="flex items-center gap-1.5 text-xs text-slate-600 hover:text-slate-400 transition-colors">
+
+      <div className="flex justify-center">
+        <button onClick={onBack}
+          className="flex items-center gap-1.5 text-xs text-slate-600 hover:text-slate-400 transition-colors">
           <ArrowLeft className="h-3.5 w-3.5" /> Voltar
         </button>
       </div>
@@ -782,26 +862,42 @@ export function GerarTesteWizard({ onNavigate }: { onNavigate?: (p: NavPage) => 
   const [teste, setTeste] = useState<TesteGerado | null>(null)
   const { addToast } = useToast()
 
-  // Determina se o passo "extra" é necessário
-  const precisaExtra = form.app === 'xcloud' || form.app === 'manual'
+  // Smart STB e manual não têm painel real → precisam do passo extra
+  // XCloud precisa da chave do dispositivo → também vai para extra
+  const precisaExtra = form.app === 'xcloud' || form.app === 'manual' || form.app === 'smartstb'
+  // Apps sem painel real pulam o passo de servidor
+  const semPainel = form.app === 'manual' || form.app === 'smartstb'
 
   const goNext = (from: WizardStep) => {
+    // App → pular servidor se não há painel compatível
+    if (from === 'app') {
+      if (semPainel) {
+        setWizardStep('extra')
+        return
+      }
+      setWizardStep('servidor')
+      return
+    }
+    // Servidor → pular extra ou ir para extra
+    if (from === 'servidor') {
+      if (precisaExtra) {
+        setWizardStep('extra')
+      } else {
+        iniciarGeracao()
+      }
+      return
+    }
     const idx = STEP_ORDER.indexOf(from)
-    // Se não precisa de extra, pula direto para gerar
-    if (from === 'servidor' && !precisaExtra) {
-      iniciarGeracao()
-      return
-    }
-    if (from === 'servidor' && precisaExtra) {
-      setWizardStep('extra')
-      return
-    }
     if (idx < STEP_ORDER.length - 1) {
       setWizardStep(STEP_ORDER[idx + 1])
     }
   }
 
   const goBack = (from: WizardStep) => {
+    if (from === 'extra' && semPainel) {
+      setWizardStep('app')
+      return
+    }
     const idx = STEP_ORDER.indexOf(from)
     if (idx > 0) setWizardStep(STEP_ORDER[idx - 1])
   }
@@ -890,17 +986,23 @@ export function GerarTesteWizard({ onNavigate }: { onNavigate?: (p: NavPage) => 
   }, [processStep])
 
   const reset = () => {
-    setForm({ nome: '', telefone: '', app: '', servidor: '', deviceKey: '', manualUser: '', manualPass: '', manualCode: '', manualHost: '', manualText: '' })
+    setForm({
+      nome: '', telefone: '', app: '', servidor: '',
+      deviceKey: '', manualUser: '', manualPass: '',
+      manualCode: '', manualHost: '', manualText: '',
+    })
     setWizardStep('dados')
     setProcessStep(null)
     setEtapas([])
     setTeste(null)
   }
 
-  // Indicador de progresso para o stepper (apenas passos que serão usados)
-  const stepsVisiveis = precisaExtra
-    ? (['dados', 'app', 'servidor', 'extra'] as WizardStep[])
-    : (['dados', 'app', 'servidor'] as WizardStep[])
+  // Passos visíveis no stepper — depende do app selecionado
+  const stepsVisiveis: WizardStep[] = (() => {
+    if (semPainel && precisaExtra) return ['dados', 'app', 'extra']
+    if (!semPainel && precisaExtra) return ['dados', 'app', 'servidor', 'extra']
+    return ['dados', 'app', 'servidor']
+  })()
   const currentStepIdx = stepsVisiveis.indexOf(wizardStep)
 
   // ── Renderização ──────────────────────────────────────────────────────────
