@@ -17,9 +17,19 @@ import type { LeadPipeline } from '@/lib/mock-data'
 
 type WizardStep = 'dados' | 'app' | 'servidor' | 'extra'
 type ProcessStep = 'gerando' | 'sucesso'
-type AppId = 'xcloud' | 'blessed' | 'playsim' | 'smartstb' | 'manual'
+type AppId = 'xcloud' | 'blessed' | 'playsim' | 'funplay' | 'smartstb' | 'manual'
 type ServerId = 'yellow' | 'ninety' | 'cinemax'
 type EtapaStatus = 'aguardando' | 'carregando' | 'concluido' | 'erro'
+
+// XCloud worker steps
+type XcloudWorkerStatus = 'aguardando' | 'processando' | 'concluido' | 'falhou'
+interface XcloudWorker {
+  id: 'acesso' | 'dispositivo' | 'xtream'
+  label: string
+  subLabel: string
+  status: XcloudWorkerStatus
+  detail?: string
+}
 
 interface FormData {
   nome: string
@@ -95,6 +105,16 @@ const APPS: {
     badgeColor: '#f97316',
     color: '#f97316',
     glow: '249,115,22',
+    image: 'https://hebbkx1anhila5yf.public.blob.vercel-storage.com/image-9cnCrfCm5sltPhvF9J8wZrEp42Ech7.png',
+    servidorPadrao: 'yellow',
+  },
+  {
+    id: 'funplay',
+    label: 'FunPlay',
+    badge: 'POPULAR',
+    badgeColor: '#ec4899',
+    color: '#ec4899',
+    glow: '236,72,153',
     image: 'https://hebbkx1anhila5yf.public.blob.vercel-storage.com/image-9cnCrfCm5sltPhvF9J8wZrEp42Ech7.png',
     servidorPadrao: 'yellow',
   },
@@ -179,7 +199,8 @@ const PAINEIS_POR_APP: Record<AppId, ServerId[]> = {
   xcloud:   ['yellow', 'ninety', 'cinemax'],
   blessed:  ['yellow'],
   playsim:  ['yellow', 'cinemax'],
-  smartstb: ['yellow', 'ninety', 'cinemax'],  // usa DNS do painel
+  funplay:  ['yellow', 'cinemax'],
+  smartstb: ['yellow', 'ninety', 'cinemax'],
   manual:   [],
 }
 
@@ -192,33 +213,29 @@ function getPaineisCompativeis(app: AppId | ''): ServerId[] {
 
 function getEtapas(app: AppId | ''): { id: string; label: string }[] {
   if (app === 'xcloud') return [
-    { id: 'validando',   label: 'Validando cliente' },
-    { id: 'painel',      label: 'Solicitando teste no painel' },
-    { id: 'credenciais', label: 'Recebendo credenciais Xtream' },
-    { id: 'xcloud',      label: 'Preparando acesso XCloud' },
-    { id: 'dispositivo', label: 'Configurando dispositivo' },
-    { id: 'supabase',    label: 'Salvando no Supabase' },
-    { id: 'mensagem',    label: 'Preparando mensagem' },
+    { id: 'acesso',      label: 'Gerando acesso no painel' },
+    { id: 'dispositivo', label: 'Adicionando aparelho no XCloud' },
+    { id: 'xtream',      label: 'Vinculando credenciais Xtream' },
+    { id: 'confirmacao', label: 'Confirmando ativacao' },
+    { id: 'salvando',    label: 'Salvando teste' },
   ]
   if (app === 'smartstb') return [
     { id: 'validando',   label: 'Validando cliente' },
     { id: 'painel',      label: 'Obtendo DNS do servidor' },
-    { id: 'credenciais', label: 'Gerando usuário e senha' },
-    { id: 'supabase',    label: 'Salvando no Supabase' },
-    { id: 'mensagem',    label: 'Preparando mensagem' },
+    { id: 'credenciais', label: 'Gerando usuario e senha' },
+    { id: 'salvando',    label: 'Salvando teste' },
   ]
   if (app === 'manual') return [
     { id: 'validando', label: 'Validando dados' },
-    { id: 'mensagem',  label: 'Montando mensagem' },
     { id: 'salvando',  label: 'Salvando teste' },
     { id: 'fim',       label: 'Finalizando' },
   ]
+  // blessed, playsim, funplay
   return [
     { id: 'validando',   label: 'Validando cliente' },
-    { id: 'painel',      label: 'Solicitando teste no painel' },
-    { id: 'credenciais', label: 'Recebendo usuário, senha e código' },
-    { id: 'supabase',    label: 'Salvando no Supabase' },
-    { id: 'mensagem',    label: 'Preparando mensagem' },
+    { id: 'painel',      label: 'Solicitando acesso no painel' },
+    { id: 'credenciais', label: 'Recebendo usuario, senha e codigo' },
+    { id: 'salvando',    label: 'Salvando teste' },
   ]
 }
 
@@ -906,6 +923,186 @@ function StepConfirmar({ form, onBack, onGerar }: { form: FormData; onBack: () =
   )
 }
 
+// ─── Tela Gerando XCloud (3 workers orquestrados) ────────────────────────────
+
+function TelaGerandoXCloud({ form, workers, onRetry, onModoManual }: {
+  form: FormData
+  workers: XcloudWorker[]
+  onRetry: (step: XcloudWorker['id']) => void
+  onModoManual: () => void
+}) {
+  const srv = SERVIDORES.find(s => s.id === form.servidor)
+
+  const iconePorStatus = (s: XcloudWorkerStatus) => {
+    if (s === 'concluido')  return <CheckCircle className="h-5 w-5 text-white" strokeWidth={3} />
+    if (s === 'processando') return <div className="h-2.5 w-2.5 animate-pulse rounded-full bg-blue-400" />
+    if (s === 'falhou')     return <AlertCircle className="h-4.5 w-4.5 text-red-400" />
+    return <div className="h-2 w-2 rounded-full" style={{ background: 'rgba(255,255,255,0.1)' }} />
+  }
+
+  const corBg = (s: XcloudWorkerStatus) => {
+    if (s === 'concluido')  return 'rgba(34,197,94,0.08)'
+    if (s === 'processando') return 'rgba(37,99,235,0.12)'
+    if (s === 'falhou')     return 'rgba(239,68,68,0.08)'
+    return 'rgba(255,255,255,0.02)'
+  }
+  const corBorder = (s: XcloudWorkerStatus) => {
+    if (s === 'concluido')  return 'rgba(34,197,94,0.15)'
+    if (s === 'processando') return 'rgba(37,99,235,0.25)'
+    if (s === 'falhou')     return 'rgba(239,68,68,0.2)'
+    return 'rgba(255,255,255,0.04)'
+  }
+  const corCircle = (s: XcloudWorkerStatus) => {
+    if (s === 'concluido')  return '#22c55e'
+    if (s === 'processando') return 'rgba(37,99,235,0.25)'
+    if (s === 'falhou')     return 'rgba(239,68,68,0.2)'
+    return 'rgba(255,255,255,0.04)'
+  }
+  const corTexto = (s: XcloudWorkerStatus) => {
+    if (s === 'concluido')  return '#86efac'
+    if (s === 'processando') return '#93c5fd'
+    if (s === 'falhou')     return '#f87171'
+    return '#475569'
+  }
+
+  const temFalha = workers.some(w => w.status === 'falhou')
+  const workerFalhou = workers.find(w => w.status === 'falhou')
+
+  return (
+    <div className="w-full max-w-md">
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="text-center mb-8">
+        <div className="relative mx-auto mb-6 flex h-28 w-28 items-center justify-center">
+          <div className="absolute inset-0 rounded-full"
+            style={{ background: 'radial-gradient(circle, rgba(20,184,166,0.15) 0%, transparent 70%)', boxShadow: '0 0 60px rgba(20,184,166,0.25)', animation: 'linePulse 2s ease-in-out infinite' }} />
+          <div className="absolute h-24 w-24 rounded-full border-[3px] animate-spin"
+            style={{ borderColor: 'rgba(20,184,166,0.1)', borderTopColor: '#14b8a6', borderRightColor: 'rgba(20,184,166,0.4)', boxShadow: '0 0 30px rgba(20,184,166,0.4)', animationDuration: '1.4s' }} />
+          <div className="absolute h-16 w-16 rounded-full border-2 animate-spin"
+            style={{ borderColor: 'transparent', borderTopColor: 'rgba(34,197,94,0.5)', animationDuration: '2.2s', animationDirection: 'reverse' }} />
+          <Zap style={{ width: 30, height: 30, color: '#14b8a6' }} />
+        </div>
+        <h2 className="mb-1 text-2xl font-bold text-white" style={{ fontFamily: 'var(--font-display)' }}>Gerando teste XCloud</h2>
+        <p className="text-sm text-muted-foreground">{form.nome} · {srv?.label ?? form.servidor}</p>
+      </motion.div>
+
+      {/* Workers */}
+      <div className="space-y-3 mb-6">
+        {workers.map((w, i) => (
+          <motion.div key={w.id} initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.1 }}
+            className="rounded-xl px-4 py-4 transition-all duration-300"
+            style={{ background: corBg(w.status), border: `1px solid ${corBorder(w.status)}` }}>
+            <div className="flex items-center gap-4">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-all duration-300"
+                style={{ background: corCircle(w.status), boxShadow: w.status === 'concluido' ? '0 0 16px rgba(34,197,94,0.5)' : w.status === 'processando' ? '0 0 16px rgba(59,130,246,0.4)' : 'none' }}>
+                {iconePorStatus(w.status)}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold transition-all duration-300" style={{ color: corTexto(w.status) }}>
+                  {w.label}
+                </p>
+                {w.detail && (
+                  <p className="mt-0.5 text-[11px] truncate" style={{ color: w.status === 'falhou' ? '#f87171' : '#475569' }}>
+                    {w.detail}
+                  </p>
+                )}
+                {!w.detail && w.status !== 'aguardando' && (
+                  <p className="mt-0.5 text-[11px] text-slate-600">{w.subLabel}</p>
+                )}
+              </div>
+              {w.status === 'processando' && (
+                <div className="h-4 w-4 rounded-full border-2 animate-spin shrink-0" style={{ borderColor: 'rgba(59,130,246,0.2)', borderTopColor: '#3b82f6' }} />
+              )}
+              {w.status === 'concluido' && (
+                <span className="text-[11px] font-bold text-emerald-400 shrink-0">OK</span>
+              )}
+              {w.status === 'falhou' && (
+                <button onClick={() => onRetry(w.id)}
+                  className="shrink-0 h-7 px-3 rounded-lg text-[11px] font-semibold transition-all"
+                  style={{ background: 'rgba(239,68,68,0.1)', color: '#f87171', border: '1px solid rgba(239,68,68,0.2)' }}>
+                  Tentar novamente
+                </button>
+              )}
+            </div>
+          </motion.div>
+        ))}
+      </div>
+
+      {/* Ações quando falha */}
+      {temFalha && (
+        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="flex gap-2">
+          <button onClick={() => onRetry(workerFalhou!.id)}
+            className="flex-1 h-11 rounded-xl text-sm font-semibold flex items-center justify-center gap-2"
+            style={{ background: 'rgba(239,68,68,0.1)', color: '#f87171', border: '1px solid rgba(239,68,68,0.2)' }}>
+            <RotateCcw className="h-4 w-4" /> Tentar novamente ({workerFalhou?.label})
+          </button>
+          <button onClick={onModoManual}
+            className="h-11 px-4 rounded-xl text-sm font-medium"
+            style={{ background: 'rgba(255,255,255,0.04)', color: '#64748b', border: '1px solid rgba(255,255,255,0.07)' }}>
+            Manual
+          </button>
+        </motion.div>
+      )}
+    </div>
+  )
+}
+
+// ─── Tela Modo Manual XCloud ──────────────────────────────────────────────────
+
+function TelaModoManualXCloud({ teste, onNovo }: { teste: TesteGerado; onNovo: () => void }) {
+  const [copied, setCopied] = useState<string | null>(null)
+  const { addToast } = useToast()
+
+  const copiarItem = (label: string, value: string) => {
+    navigator.clipboard.writeText(value)
+    setCopied(label)
+    addToast('success', `${label} copiado!`)
+    setTimeout(() => setCopied(null), 2000)
+  }
+
+  const itens = [
+    { label: 'Painel XCloud', value: 'https://xcloud.tv/panel' },
+    { label: 'Device Key',    value: teste.usuario.replace(/./g, (c, i) => i < 4 ? c : '*') },
+    { label: 'Host',          value: teste.xtreamHost },
+    { label: 'Usuario',       value: teste.usuario },
+    { label: 'Senha',         value: teste.senha },
+  ]
+
+  return (
+    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-md">
+      <div className="text-center mb-6">
+        <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-xl"
+          style={{ background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.25)' }}>
+          <Keyboard className="h-7 w-7 text-amber-400" />
+        </div>
+        <h2 className="text-xl font-bold text-white">Modo manual XCloud</h2>
+        <p className="mt-1 text-sm text-slate-500">Copie os dados e conclua a ativacao manualmente</p>
+      </div>
+      <div className="space-y-2 mb-6">
+        {itens.map(item => (
+          <div key={item.label} className="flex items-center justify-between rounded-xl px-4 py-3"
+            style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-600">{item.label}</p>
+              <p className="text-sm font-semibold text-slate-200">{item.value}</p>
+            </div>
+            <button onClick={() => copiarItem(item.label, item.value)}
+              className="h-8 w-8 rounded-lg flex items-center justify-center transition-all"
+              style={{ background: copied === item.label ? 'rgba(34,197,94,0.15)' : 'rgba(255,255,255,0.05)' }}>
+              {copied === item.label
+                ? <Check className="h-4 w-4 text-emerald-400" />
+                : <Copy className="h-4 w-4 text-slate-500" />}
+            </button>
+          </div>
+        ))}
+      </div>
+      <button onClick={onNovo}
+        className="w-full h-11 rounded-xl text-sm font-medium flex items-center justify-center gap-2"
+        style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', color: '#64748b' }}>
+        <RotateCcw className="h-4 w-4" /> Gerar outro teste
+      </button>
+    </motion.div>
+  )
+}
+
 // ─── Tela Gerando ─────────────────────────────────────────────────────────────
 
 function TelaGerando({ form, etapas }: { form: FormData; etapas: EtapaGeracao[] }) {
@@ -973,8 +1170,12 @@ function TelaGerando({ form, etapas }: { form: FormData; etapas: EtapaGeracao[] 
 
 // ─── Tela Sucesso ─────────────────────────────────────────────────────────────
 
-function TelaSucesso({ teste, onNovo, onVerTestes }: {
-  teste: TesteGerado; onNovo: () => void; onVerTestes?: () => void
+function TelaSucesso({ teste, onNovo, onVerTestes, onAtivar, onVerLog }: {
+  teste: TesteGerado
+  onNovo: () => void
+  onVerTestes?: () => void
+  onAtivar?: () => void
+  onVerLog?: () => void
 }) {
   const [copied, setCopied] = useState(false)
   const { addToast } = useToast()
@@ -1006,19 +1207,31 @@ function TelaSucesso({ teste, onNovo, onVerTestes }: {
     window.open(`https://painel2.centralplayplus.com.br?${params.toString()}`, '_blank')
   }
 
+  // deviceKey mascarada: mostra primeiros 4 e substitui o resto por *
+  const mascaraDeviceKey = (key: string) => key.length > 4 ? key.substring(0, 4) + '*'.repeat(Math.min(key.length - 4, 8)) : key
+
   const campos = [
     { label: 'Cliente',    value: teste.clientName },
     { label: 'Telefone',   value: teste.phone },
     { label: 'Pedido',     value: teste.pedido },
     { label: 'Aplicativo', value: appSelecionado?.label ?? teste.app },
-    ...(!isManual && servidorSelecionado ? [{ label: 'Painel', value: servidorSelecionado.label }] : []),
+    ...(!isManual && servidorSelecionado ? [{ label: 'Painel gerador', value: servidorSelecionado.label }] : []),
+    ...(isXCloud && teste.usuario ? [{ label: 'Device Key', value: mascaraDeviceKey(teste.usuario) }] : []),
     ...(isSmartStb ? [{ label: 'DNS', value: teste.dns }] : []),
     ...(isXCloud   ? [{ label: 'Host', value: teste.xtreamHost }] : []),
-    ...(!isXCloud && !isManual ? [{ label: 'Código', value: teste.codigo }] : []),
-    { label: 'Usuário',    value: teste.usuario },
+    ...(!isXCloud && !isManual ? [{ label: 'Codigo', value: teste.codigo }] : []),
+    { label: 'Usuario',    value: teste.usuario },
     { label: 'Senha',      value: teste.senha },
     { label: 'Validade',   value: teste.validade },
   ]
+
+  // Badges de status XCloud
+  const xcloudStatus = isXCloud ? [
+    { label: 'Acesso gerado',      ok: true },
+    { label: 'Device adicionado',  ok: true },
+    { label: 'Xtream vinculado',   ok: true },
+    { label: 'RELOAD confirmado',  ok: true },
+  ] : null
 
   return (
     <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="w-full max-w-lg py-8">
@@ -1043,10 +1256,24 @@ function TelaSucesso({ teste, onNovo, onVerTestes }: {
         style={{ background: 'linear-gradient(180deg, #07111F 0%, #0A1728 100%)', border: '1px solid rgba(59,130,246,0.14)', boxShadow: '0 0 0 1px rgba(255,255,255,0.03), 0 32px 64px rgba(0,0,0,0.7)' }}>
         <div className="h-px" style={{ background: 'linear-gradient(90deg, transparent, rgba(34,197,94,0.5) 40%, rgba(59,130,246,0.4) 60%, transparent)' }} />
         <div className="p-6">
-          {/* Dados técnicos */}
+          {/* Status XCloud */}
+          {xcloudStatus && (
+            <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }}
+              className="grid grid-cols-2 gap-1.5 mb-5">
+              {xcloudStatus.map(s => (
+                <div key={s.label} className="flex items-center gap-1.5 rounded-lg px-3 py-1.5"
+                  style={{ background: 'rgba(34,197,94,0.07)', border: '1px solid rgba(34,197,94,0.15)' }}>
+                  <Check className="h-3 w-3 text-emerald-400 shrink-0" />
+                  <span className="text-[11px] font-medium text-emerald-400/80">{s.label}</span>
+                </div>
+              ))}
+            </motion.div>
+          )}
+
+          {/* Dados tecnicos */}
           <div className="mb-5 grid grid-cols-2 gap-2.5">
             {campos.map((item, i) => (
-              <motion.div key={item.label} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 + i * 0.05 }}
+              <motion.div key={item.label} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 + i * 0.04 }}
                 className="rounded-xl px-3 py-2.5"
                 style={{ background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.05)' }}>
                 <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: '#1e3a5f' }}>{item.label}</p>
@@ -1056,7 +1283,7 @@ function TelaSucesso({ teste, onNovo, onVerTestes }: {
           </div>
 
           {/* CTA Principal — Abrir no Painel 2 */}
-          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.6 }} className="mb-3">
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.6 }} className="mb-2.5">
             <button onClick={abrirPainel2}
               className="relative w-full overflow-hidden flex h-14 items-center justify-center gap-3 rounded-xl text-base font-bold text-white transition-all"
               style={{ background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 50%, #1e40af 100%)', boxShadow: '0 0 0 1px rgba(59,130,246,0.3), 0 8px 32px rgba(59,130,246,0.4), inset 0 1px 0 rgba(255,255,255,0.12)', fontFamily: 'var(--font-display)' }}>
@@ -1065,13 +1292,26 @@ function TelaSucesso({ teste, onNovo, onVerTestes }: {
               <ExternalLink className="h-5 w-5 relative" />
               <div className="relative flex flex-col items-start">
                 <span className="leading-tight">Abrir no Painel 2</span>
-                <span className="text-[10px] font-normal opacity-60 leading-tight">Enviar mensagem, instalação e fluxos em tempo real</span>
+                <span className="text-[10px] font-normal opacity-60 leading-tight">Mensagens, instalacao e fluxos em tempo real</span>
               </div>
             </button>
           </motion.div>
 
-          {/* Ações secundárias */}
-          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.7 }} className="grid grid-cols-3 gap-2">
+          {/* Ativar cliente */}
+          {onAtivar && (
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.68 }} className="mb-3">
+              <button onClick={onAtivar}
+                className="relative w-full overflow-hidden flex h-12 items-center justify-center gap-2.5 rounded-xl text-sm font-bold text-white transition-all"
+                style={{ background: 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)', boxShadow: '0 0 0 1px rgba(34,197,94,0.25), 0 4px 16px rgba(34,197,94,0.3)', fontFamily: 'var(--font-display)' }}>
+                <Zap className="h-4.5 w-4.5 relative" />
+                <span className="relative">Ativar cliente</span>
+                <span className="relative text-[10px] font-normal opacity-60">ocupa tela</span>
+              </button>
+            </motion.div>
+          )}
+
+          {/* Acoes secundarias */}
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.75 }} className="grid grid-cols-3 gap-2">
             <button onClick={copiarDados}
               className="flex h-11 items-center justify-center gap-1.5 rounded-xl text-sm font-medium transition-all hover:bg-white/[0.07]"
               style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', color: '#94a3b8' }}>
@@ -1084,14 +1324,21 @@ function TelaSucesso({ teste, onNovo, onVerTestes }: {
               <RotateCcw className="h-[17px] w-[17px]" />
               Novo
             </button>
-            {onVerTestes && (
+            {onVerTestes ? (
               <button onClick={onVerTestes}
                 className="flex h-11 items-center justify-center gap-1.5 rounded-xl text-sm font-medium transition-all hover:bg-white/[0.05]"
                 style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)', color: '#64748b' }}>
                 <ExternalLink className="h-[17px] w-[17px]" />
-                Ver testes
+                Testes
               </button>
-            )}
+            ) : onVerLog ? (
+              <button onClick={onVerLog}
+                className="flex h-11 items-center justify-center gap-1.5 rounded-xl text-sm font-medium transition-all hover:bg-white/[0.05]"
+                style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)', color: '#64748b' }}>
+                <Server className="h-[17px] w-[17px]" />
+                Ver log
+              </button>
+            ) : null}
           </motion.div>
         </div>
       </motion.div>
@@ -1121,6 +1368,14 @@ export function GerarTesteWizard({ onNavigate }: { onNavigate?: (p: NavPage) => 
   const [teste,     setTeste]     = useState<TesteGerado | null>(null)
   const [direction, setDirection] = useState<1 | -1>(1)
   const [mostrarServidores, setMostrarServidores] = useState(false)
+  const [modoManualXcloud, setModoManualXcloud] = useState(false)
+
+  // XCloud workers state
+  const [xcloudWorkers, setXcloudWorkers] = useState<XcloudWorker[]>([
+    { id: 'acesso',      label: 'Gerando acesso',      subLabel: 'Painel gerador → credenciais Xtream',    status: 'aguardando' },
+    { id: 'dispositivo', label: 'Adicionando aparelho', subLabel: 'XCloud Devices → Device Key',            status: 'aguardando' },
+    { id: 'xtream',      label: 'Vinculando XCloud',   subLabel: 'Custom Playlist → Xtream Credentials',   status: 'aguardando' },
+  ])
   const { addToast } = useToast()
 
   // Smart STB tem painel mas precisa de extra (usuário+senha)
@@ -1166,6 +1421,10 @@ export function GerarTesteWizard({ onNavigate }: { onNavigate?: (p: NavPage) => 
   const iniciarGeracao = () => {
     const etapasBase = getEtapas(form.app)
     setEtapas(etapasBase.map(e => ({ ...e, status: 'aguardando' })))
+    // XCloud: resetar workers para aguardando
+    if (form.app === 'xcloud') {
+      setXcloudWorkers(prev => prev.map(w => ({ ...w, status: 'aguardando', detail: undefined })))
+    }
     setProcessStep('gerando')
   }
 
@@ -1174,6 +1433,19 @@ export function GerarTesteWizard({ onNavigate }: { onNavigate?: (p: NavPage) => 
     if (processStep !== 'gerando') return
     const etapasBase = getEtapas(form.app)
     const timers: ReturnType<typeof setTimeout>[] = []
+
+    // XCloud: anima os 3 workers em sequencia com dependencia
+    if (form.app === 'xcloud') {
+      const workerIds: XcloudWorker['id'][] = ['acesso', 'dispositivo', 'xtream']
+      workerIds.forEach((id, i) => {
+        timers.push(setTimeout(() => {
+          setXcloudWorkers(prev => prev.map(w => w.id === id ? { ...w, status: 'processando' } : w))
+        }, i * 1100))
+        timers.push(setTimeout(() => {
+          setXcloudWorkers(prev => prev.map(w => w.id === id ? { ...w, status: 'concluido', detail: id === 'acesso' ? 'Credenciais Xtream geradas.' : id === 'dispositivo' ? 'Device adicionado com ativacao imediata.' : 'Xtream vinculado. RELOAD confirmado.' } : w))
+        }, i * 1100 + 900))
+      })
+    }
 
     etapasBase.forEach((_, i) => {
       timers.push(setTimeout(() => {
@@ -1318,7 +1590,19 @@ export function GerarTesteWizard({ onNavigate }: { onNavigate?: (p: NavPage) => 
   const reset = () => {
     setForm({ nome: '', telefone: '', app: '', servidor: '', deviceKey: '', manualUser: '', manualPass: '', manualCode: '', manualHost: '', manualText: '' })
     setWizardStep('dados'); setProcessStep(null); setEtapas([]); setTeste(null)
-    setDirection(1); setMostrarServidores(false)
+    setDirection(1); setMostrarServidores(false); setModoManualXcloud(false)
+    setXcloudWorkers([
+      { id: 'acesso',      label: 'Gerando acesso',      subLabel: 'Painel gerador → credenciais Xtream',  status: 'aguardando' },
+      { id: 'dispositivo', label: 'Adicionando aparelho', subLabel: 'XCloud Devices → Device Key',          status: 'aguardando' },
+      { id: 'xtream',      label: 'Vinculando XCloud',   subLabel: 'Custom Playlist → Xtream Credentials', status: 'aguardando' },
+    ])
+  }
+
+  const handleRetryXcloudStep = (stepId: XcloudWorker['id']) => {
+    setXcloudWorkers(prev => prev.map(w => w.id === stepId ? { ...w, status: 'processando', detail: undefined } : w))
+    setTimeout(() => {
+      setXcloudWorkers(prev => prev.map(w => w.id === stepId ? { ...w, status: 'concluido', detail: 'Retry concluido com sucesso.' } : w))
+    }, 1400)
   }
 
   // ── Telas de processamento (sem card centralizado)
@@ -1327,18 +1611,46 @@ export function GerarTesteWizard({ onNavigate }: { onNavigate?: (p: NavPage) => 
       <div className="relative min-h-screen flex-1 overflow-hidden">
         <NeonBackground />
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(7,10,18,0.97)' }}>
-          <TelaGerando form={form} etapas={etapas} />
+          {form.app === 'xcloud'
+            ? <TelaGerandoXCloud
+                form={form}
+                workers={xcloudWorkers}
+                onRetry={handleRetryXcloudStep}
+                onModoManual={() => { setModoManualXcloud(true); setProcessStep('sucesso') }}
+              />
+            : <TelaGerando form={form} etapas={etapas} />
+          }
         </div>
       </div>
     )
   }
 
   if (processStep === 'sucesso' && teste) {
+    // XCloud modo manual
+    if (modoManualXcloud) {
+      return (
+        <div className="relative min-h-screen flex-1 overflow-hidden">
+          <NeonBackground />
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto" style={{ background: 'rgba(7,10,18,0.97)' }}>
+            <TelaModoManualXCloud teste={teste} onNovo={reset} />
+          </div>
+        </div>
+      )
+    }
     return (
       <div className="relative min-h-screen flex-1 overflow-hidden">
         <NeonBackground />
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto" style={{ background: 'rgba(7,10,18,0.97)' }}>
-          <TelaSucesso teste={teste} onNovo={reset} onVerTestes={() => onNavigate?.('testes')} />
+          <TelaSucesso
+            teste={teste}
+            onNovo={reset}
+            onVerTestes={() => onNavigate?.('testes')}
+            onAtivar={() => {
+              addToast('info', 'Ativacao: verifique vagas livres antes de criar nova conta.')
+              onNavigate?.('clientes')
+            }}
+            onVerLog={() => onNavigate?.('debug')}
+          />
         </div>
       </div>
     )
