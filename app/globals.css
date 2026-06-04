@@ -96,6 +96,10 @@
   * {
     @apply border-border outline-ring/50;
   }
+  html, body {
+    background-color: #0c0e14;
+    color: #e2e8f0;
+  }
   body {
     @apply bg-background text-foreground;
     font-feature-settings: "rlig" 1, "calt" 1;
