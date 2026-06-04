@@ -3,9 +3,9 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-  MessageCircle, Copy, CheckCircle, ArrowRight, ArrowLeft,
-  RotateCcw, Zap, Server, User, Phone, ChevronDown,
-  ExternalLink, Keyboard
+  ArrowRight, ArrowLeft, Copy, CheckCircle,
+  RotateCcw, ExternalLink, Loader2, AlertCircle, Check,
+  Keyboard, User, Phone, Zap, Server, ChevronDown,
 } from 'lucide-react'
 import { useToast } from '@/components/ui/toast'
 import { cn } from '@/lib/utils'
@@ -985,17 +985,25 @@ function TelaSucesso({ teste, onNovo, onVerTestes }: {
   const isSmartStb = teste.app === 'smartstb'
   const isManual   = teste.app === 'manual'
 
-  const copiar = () => {
-    navigator.clipboard.writeText(teste.mensagem)
+  const copiarDados = () => {
+    const linhas = campos
+      .filter(c => c.value)
+      .map(c => `${c.label}: ${c.value}`)
+      .join('\n')
+    navigator.clipboard.writeText(linhas)
     setCopied(true)
-    addToast('success', 'Mensagem copiada!')
+    addToast('success', 'Dados copiados!')
     setTimeout(() => setCopied(false), 2000)
   }
 
-  const abrirWhatsApp = () => {
-    const tel = teste.phone.replace(/\D/g, '')
-    window.open(`https://wa.me/55${tel}?text=${encodeURIComponent(teste.mensagem)}`, '_blank')
-    addToast('success', 'Abrindo WhatsApp...')
+  const abrirPainel2 = () => {
+    const params = new URLSearchParams({
+      cliente: teste.clientName,
+      telefone: teste.phone,
+      pedido:  teste.pedido,
+      app:     teste.app,
+    })
+    window.open(`https://painel2.centralplayplus.com.br?${params.toString()}`, '_blank')
   }
 
   const campos = [
@@ -1005,7 +1013,7 @@ function TelaSucesso({ teste, onNovo, onVerTestes }: {
     { label: 'Aplicativo', value: appSelecionado?.label ?? teste.app },
     ...(!isManual && servidorSelecionado ? [{ label: 'Painel', value: servidorSelecionado.label }] : []),
     ...(isSmartStb ? [{ label: 'DNS', value: teste.dns }] : []),
-    ...(isXCloud   ? [{ label: 'Host Xtream', value: teste.xtreamHost }] : []),
+    ...(isXCloud   ? [{ label: 'Host', value: teste.xtreamHost }] : []),
     ...(!isXCloud && !isManual ? [{ label: 'Código', value: teste.codigo }] : []),
     { label: 'Usuário',    value: teste.usuario },
     { label: 'Senha',      value: teste.senha },
@@ -1020,13 +1028,12 @@ function TelaSucesso({ teste, onNovo, onVerTestes }: {
           <CheckCircle className="h-10 w-10 text-emerald-400" />
         </div>
         <h1 className="text-2xl font-bold text-white" style={{ fontFamily: 'var(--font-display)' }}>Teste gerado com sucesso!</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Pronto para enviar para {teste.clientName}</p>
-        {/* Badge fonte de dados */}
+        <p className="mt-1 text-sm text-muted-foreground">{teste.clientName} · {teste.pedido}</p>
         <div className="mt-3 inline-flex items-center gap-1.5 rounded-full px-3 py-1"
           style={{ background: teste.source === 'supabase' ? 'rgba(34,197,94,0.1)' : 'rgba(245,158,11,0.1)', border: `1px solid ${teste.source === 'supabase' ? 'rgba(34,197,94,0.25)' : 'rgba(245,158,11,0.25)'}` }}>
           <span className="h-1.5 w-1.5 rounded-full" style={{ background: teste.source === 'supabase' ? '#4ade80' : '#fbbf24' }} />
           <span className="text-[11px] font-medium" style={{ color: teste.source === 'supabase' ? '#4ade80' : '#fbbf24' }}>
-            {teste.source === 'supabase' ? 'Gravado no Supabase' : 'Sandbox / Mock'}
+            {teste.source === 'supabase' ? 'Registrado no Supabase' : 'Sandbox / Mock'}
           </span>
         </div>
       </motion.div>
@@ -1036,6 +1043,7 @@ function TelaSucesso({ teste, onNovo, onVerTestes }: {
         style={{ background: 'linear-gradient(180deg, #07111F 0%, #0A1728 100%)', border: '1px solid rgba(59,130,246,0.14)', boxShadow: '0 0 0 1px rgba(255,255,255,0.03), 0 32px 64px rgba(0,0,0,0.7)' }}>
         <div className="h-px" style={{ background: 'linear-gradient(90deg, transparent, rgba(34,197,94,0.5) 40%, rgba(59,130,246,0.4) 60%, transparent)' }} />
         <div className="p-6">
+          {/* Dados técnicos */}
           <div className="mb-5 grid grid-cols-2 gap-2.5">
             {campos.map((item, i) => (
               <motion.div key={item.label} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 + i * 0.05 }}
@@ -1047,29 +1055,24 @@ function TelaSucesso({ teste, onNovo, onVerTestes }: {
             ))}
           </div>
 
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.6 }}
-            className="mb-5 rounded-xl p-4"
-            style={{ background: 'rgba(37,99,235,0.04)', border: '1px solid rgba(37,99,235,0.1)' }}>
-            <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider" style={{ color: '#1e3a5f' }}>Prévia da mensagem</p>
-            <pre className="whitespace-pre-wrap font-sans text-xs leading-relaxed text-slate-400">{teste.mensagem}</pre>
-          </motion.div>
-
-          {/* CTA Principal — Enviar para cliente */}
-          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.65 }} className="mb-3">
-            <button onClick={abrirWhatsApp}
-              className="relative w-full overflow-hidden flex h-14 items-center justify-center gap-2.5 rounded-xl text-base font-bold text-white transition-all"
-              style={{ background: 'linear-gradient(135deg, #22c55e 0%, #16a34a 50%, #15803d 100%)', boxShadow: '0 0 0 1px rgba(34,197,94,0.3), 0 8px 32px rgba(34,197,94,0.45), inset 0 1px 0 rgba(255,255,255,0.15)', fontFamily: 'var(--font-display)' }}>
+          {/* CTA Principal — Abrir no Painel 2 */}
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.6 }} className="mb-3">
+            <button onClick={abrirPainel2}
+              className="relative w-full overflow-hidden flex h-14 items-center justify-center gap-3 rounded-xl text-base font-bold text-white transition-all"
+              style={{ background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 50%, #1e40af 100%)', boxShadow: '0 0 0 1px rgba(59,130,246,0.3), 0 8px 32px rgba(59,130,246,0.4), inset 0 1px 0 rgba(255,255,255,0.12)', fontFamily: 'var(--font-display)' }}>
               <span className="pointer-events-none absolute inset-y-0 left-[-75%] w-1/2 skew-x-[-20deg]"
-                style={{ background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.12), transparent)', animation: 'shineSweep 3.5s ease-in-out infinite' }} />
-              <MessageCircle className="h-5 w-5 relative" />
-              <span className="relative">Enviar para cliente</span>
-              <span className="relative text-xs font-normal opacity-70 ml-0.5">via WhatsApp</span>
+                style={{ background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent)', animation: 'shineSweep 3.5s ease-in-out infinite' }} />
+              <ExternalLink className="h-5 w-5 relative" />
+              <div className="relative flex flex-col items-start">
+                <span className="leading-tight">Abrir no Painel 2</span>
+                <span className="text-[10px] font-normal opacity-60 leading-tight">Enviar mensagem, instalação e fluxos em tempo real</span>
+              </div>
             </button>
           </motion.div>
 
           {/* Ações secundárias */}
-          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.75 }} className="grid grid-cols-3 gap-2">
-            <button onClick={copiar}
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.7 }} className="grid grid-cols-3 gap-2">
+            <button onClick={copiarDados}
               className="flex h-11 items-center justify-center gap-1.5 rounded-xl text-sm font-medium transition-all hover:bg-white/[0.07]"
               style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', color: '#94a3b8' }}>
               {copied ? <CheckCircle className="h-[17px] w-[17px] text-emerald-400" /> : <Copy className="h-[17px] w-[17px]" />}
