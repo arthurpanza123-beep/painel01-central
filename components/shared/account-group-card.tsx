@@ -91,7 +91,7 @@ export function AccountGroupCard({
                 {vinc.nome.charAt(0)}
               </div>
               <div className="min-w-0 flex-1">
-                <p className="text-xs font-medium text-white truncate">Cliente {i + 1} · {vinc.nome}</p>
+                <p className="text-xs font-medium text-white truncate">Tela {String(i + 1).padStart(2, '0')} · {vinc.nome}</p>
                 <p className="text-[10px] text-slate-500">{vinc.telefone}</p>
               </div>
               <span className="text-[9px] text-slate-600 shrink-0">desde {vinc.criadoEm}</span>
@@ -101,17 +101,17 @@ export function AccountGroupCard({
               key={i}
               onClick={() => onAtivar(i)}
               className="w-full flex items-center gap-3 rounded-lg p-2.5 transition-all hover:brightness-125 group"
-              style={{ background: 'rgba(255,255,255,0.015)', border: '1px dashed var(--border)' }}
+              style={{ background: 'rgba(34,197,94,0.04)', border: '1px dashed rgba(34,197,94,0.25)' }}
             >
               <div
                 className="h-7 w-7 rounded-full flex items-center justify-center shrink-0"
-                style={{ background: 'rgba(96,165,250,0.12)', color: '#60a5fa' }}
+                style={{ background: 'rgba(34,197,94,0.12)', color: '#4ade80' }}
               >
                 <UserPlus className="h-3.5 w-3.5" />
               </div>
               <div className="text-left">
-                <span className="text-xs font-medium block" style={{ color: '#60a5fa' }}>Ativar cliente nesta vaga</span>
-                <span className="text-[10px] text-slate-600">Vaga {i + 1} disponivel</span>
+                <span className="text-xs font-medium block" style={{ color: '#4ade80' }}>Tela {String(i + 1).padStart(2, '0')} livre · ativar sem nova conta</span>
+                <span className="text-[10px] text-slate-600">Aproveite a vaga e economize um cadastro</span>
               </div>
             </button>
           )

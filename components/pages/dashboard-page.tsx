@@ -6,45 +6,68 @@ import {
   ArrowUpRight, Activity, Clock
 } from 'lucide-react'
 import type { NavPage } from '@/app/page'
+// MOCK: importação direta dos mocks — usada como fallback quando metrics não é passado
+// MIGRAÇÃO FUTURA: remover estas importações quando getDashboardData() for chamado
+//   no Server Component pai (app/page.tsx) e os dados forem passados via props.
 import {
   MOCK_TESTES, MOCK_CLIENTES, MOCK_PIPELINE, MOCK_CREDITOS,
   calcularMetricasFinanceiro, calcularMetricasPipeline,
 } from '@/lib/mock-data'
+import type { DashboardMetrics } from '@/lib/supabase/types'
 
-export function DashboardPage({ onNavigate }: { onNavigate: (p: NavPage) => void }) {
-  const fin = calcularMetricasFinanceiro()
+interface DashboardPageProps {
+  onNavigate: (p: NavPage) => void
+  /**
+   * Dados vindos de getDashboardData() (lib/queries/dashboard.ts).
+   * Se não for passado, o componente usa os mocks diretamente.
+   * MIGRAÇÃO FUTURA: tornar obrigatório quando o Server Component pai
+   *   passar os dados reais.
+   */
+  metrics?: DashboardMetrics
+}
+
+export function DashboardPage({ onNavigate, metrics }: DashboardPageProps) {
+  // ── Fallback para mock quando metrics não for fornecido (estado atual) ──
+  // MOCK: bloco abaixo é temporário — remover quando metrics vier do Supabase
+  const fin  = calcularMetricasFinanceiro()
   const pipe = calcularMetricasPipeline()
 
-  const testesAtivos = MOCK_TESTES.filter(t => t.status === 'ativo').length
-  const testesHoje = MOCK_TESTES.length
-  const leadsAndamento = MOCK_PIPELINE.filter(
-    l => l.etapa !== 'ativado' && l.etapa !== 'renovacao'
-  ).length
-  const clientesAtivos = MOCK_CLIENTES.filter(c => c.status === 'ativo').length
-  const creditos = fin.creditosDisponiveis
-  const receitaPrevista = fin.receitaPrevista30d
+  const testesAtivos   = metrics?.active_tests        ?? MOCK_TESTES.filter(t => t.status === 'ativo').length
+  const testesHoje     = metrics?.total_tests         ?? MOCK_TESTES.length
+  const leadsAndamento = metrics?.leads_in_progress   ?? MOCK_PIPELINE.filter(l => l.etapa !== 'ativado' && l.etapa !== 'renovacao').length
+  const clientesAtivos = metrics?.active_clients      ?? MOCK_CLIENTES.filter(c => c.status === 'ativo').length
+  const creditos       = metrics?.available_credits   ?? fin.creditosDisponiveis
+  const receitaPrevista = metrics?.revenue_forecast_30d ?? fin.receitaPrevista30d
 
   const serie = [
-    { label: 'Hoje', value: fin.receitaMesAtual },
-    { label: '30d', value: fin.receitaPrevista30d },
-    { label: '60d', value: fin.receitaPrevista60d },
-    { label: '90d', value: fin.receitaPrevista90d },
+    { label: 'Hoje', value: metrics?.revenue_current_month  ?? fin.receitaMesAtual },
+    { label: '30d',  value: metrics?.revenue_forecast_30d   ?? fin.receitaPrevista30d },
+    { label: '60d',  value: metrics?.revenue_forecast_60d   ?? fin.receitaPrevista60d },
+    { label: '90d',  value: metrics?.revenue_forecast_90d   ?? fin.receitaPrevista90d },
   ]
   const maxSerie = Math.max(...serie.map(s => s.value), 1)
 
-  const funil = [
-    { label: 'Leads', value: pipe.novo_lead + pipe.contato, color: '#3b82f6' },
-    { label: 'Testando', value: pipe.teste_gerado + pipe.testando, color: '#f59e0b' },
-    { label: 'Interesse', value: pipe.interessado, color: '#a78bfa' },
-    { label: 'Pagaram', value: pipe.pagou, color: '#22c55e' },
-    { label: 'Ativados', value: pipe.ativado, color: '#14b8a6' },
-  ]
+  // MOCK: funil vem do pipe mock ou de metrics.funnel
+  const funil = metrics?.funnel
+    ? metrics.funnel.map(f => ({ label: f.label, value: f.count, color: f.color }))
+    : [
+        { label: 'Leads',     value: pipe.novo_lead + pipe.contato,    color: '#3b82f6' },
+        { label: 'Testando',  value: pipe.teste_gerado + pipe.testando, color: '#f59e0b' },
+        { label: 'Interesse', value: pipe.interessado,                  color: '#a78bfa' },
+        { label: 'Pagaram',   value: pipe.pagou,                        color: '#22c55e' },
+        { label: 'Ativados',  value: pipe.ativado,                      color: '#14b8a6' },
+      ]
+
+  // MOCK: créditos vêm do mock ou de metrics.panel_credits
+  const painelCreditos = metrics?.panel_credits
+    ? metrics.panel_credits.map(c => ({ id: c.id, painel: c.panel, saldo: c.balance, alertaBaixo: c.low_balance }))
+    : MOCK_CREDITOS
 
   const kpis = [
-    { label: 'Testes ativos', value: testesAtivos, icon: TestTube2, color: '#3b82f6', page: 'testes' as NavPage },
-    { label: 'Gerados hoje', value: testesHoje, icon: Zap, color: '#f59e0b', page: 'testes' as NavPage },
-    { label: 'Leads em andamento', value: leadsAndamento, icon: Kanban, color: '#a78bfa', page: 'pipeline' as NavPage },
-    { label: 'Clientes ativos', value: clientesAtivos, icon: Users, color: '#22c55e', page: 'clientes' as NavPage },
+    { label: 'Testes ativos',      value: testesAtivos,   icon: TestTube2, color: '#3b82f6', page: 'testes'   as NavPage },
+    { label: 'Gerados hoje',       value: testesHoje,     icon: Zap,       color: '#f59e0b', page: 'testes'   as NavPage },
+    { label: 'Leads em andamento', value: leadsAndamento, icon: Kanban,    color: '#a78bfa', page: 'pipeline' as NavPage },
+    { label: 'Clientes ativos',    value: clientesAtivos, icon: Users,     color: '#22c55e', page: 'clientes' as NavPage },
   ]
 
   return (
@@ -164,7 +187,7 @@ export function DashboardPage({ onNavigate }: { onNavigate: (p: NavPage) => void
               R$ {creditos.toFixed(0)}
             </p>
             <div className="space-y-2.5">
-              {MOCK_CREDITOS.slice(0, 4).map(c => (
+              {painelCreditos.slice(0, 4).map(c => (
                 <div key={c.id} className="flex items-center justify-between">
                   <span className="text-xs text-slate-400 flex items-center gap-1.5">
                     {c.alertaBaixo && <span className="h-1.5 w-1.5 rounded-full" style={{ background: '#f59e0b' }} />}
@@ -179,7 +202,7 @@ export function DashboardPage({ onNavigate }: { onNavigate: (p: NavPage) => void
           </motion.button>
         </div>
 
-        {/* Hoje na operação */}
+        {/* Funil */}
         <motion.div
           initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}
           className="rounded-2xl p-6"
@@ -190,12 +213,25 @@ export function DashboardPage({ onNavigate }: { onNavigate: (p: NavPage) => void
               <Clock className="h-4 w-4" style={{ color: '#3b82f6' }} />
               <h2 className="text-sm font-semibold text-white">Hoje na operação</h2>
             </div>
-            <button
-              onClick={() => onNavigate('pipeline')}
-              className="text-xs text-slate-500 hover:text-white transition-colors flex items-center gap-1"
-            >
-              Ver pipeline <ArrowUpRight className="h-3 w-3" />
-            </button>
+            <div className="flex items-center gap-3">
+              {/* Indicador de fonte de dados — Modo teste = laranja, Supabase = verde */}
+              <span
+                className="text-[10px] px-2 py-0.5 rounded-full font-medium"
+                style={{
+                  background: metrics?.data_source === 'supabase' ? 'rgba(34,197,94,0.12)' : 'rgba(245,158,11,0.12)',
+                  color:      metrics?.data_source === 'supabase' ? '#4ade80' : '#fbbf24',
+                  border:     `1px solid ${metrics?.data_source === 'supabase' ? 'rgba(34,197,94,0.25)' : 'rgba(245,158,11,0.25)'}`,
+                }}
+              >
+                {metrics?.data_source === 'supabase' ? 'Supabase' : 'Modo teste'}
+              </span>
+              <button
+                onClick={() => onNavigate('pipeline')}
+                className="text-xs text-slate-500 hover:text-white transition-colors flex items-center gap-1"
+              >
+                Ver pipeline <ArrowUpRight className="h-3 w-3" />
+              </button>
+            </div>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
             {funil.map(f => (

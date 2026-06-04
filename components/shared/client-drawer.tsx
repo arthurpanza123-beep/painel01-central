@@ -27,12 +27,12 @@ function Field({ icon: Icon, label, value }: { icon: typeof User; label: string;
 export function ClientDrawer({
   cliente,
   onClose,
-  onWhatsApp,
+  onPainel2,
   onRenovar,
 }: {
   cliente: Cliente | null
   onClose: () => void
-  onWhatsApp: (c: Cliente) => void
+  onPainel2: (c: Cliente) => void
   onRenovar: (c: Cliente) => void
 }) {
   const { addToast } = useToast()
@@ -148,8 +148,8 @@ export function ClientDrawer({
 
             {/* Acoes fixas */}
             <div className="sticky bottom-0 p-4 flex gap-2" style={{ background: 'var(--background)', borderTop: '1px solid var(--border)' }}>
-              <button onClick={() => onWhatsApp(cliente)} className="flex-1 h-10 rounded-xl text-sm font-medium flex items-center justify-center gap-2" style={{ background: 'rgba(34,197,94,0.12)', color: '#4ade80', border: '1px solid rgba(34,197,94,0.2)' }}>
-                <MessageCircle className="h-4 w-4" /> WhatsApp
+              <button onClick={() => onPainel2(cliente)} className="flex-1 h-10 rounded-xl text-sm font-medium flex items-center justify-center gap-2" style={{ background: 'rgba(37,99,235,0.14)', color: '#93c5fd', border: '1px solid rgba(37,99,235,0.28)' }}>
+                <ExternalLink className="h-4 w-4" /> Painel 2
               </button>
               <button onClick={() => onRenovar(cliente)} className="flex-1 h-10 rounded-xl text-sm font-medium flex items-center justify-center gap-2" style={{ background: 'rgba(59,130,246,0.15)', color: '#60a5fa', border: '1px solid rgba(59,130,246,0.25)' }}>
                 <RefreshCw className="h-4 w-4" /> Renovar

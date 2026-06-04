@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion } from 'framer-motion'
 import {
   Settings,
   Server,
@@ -10,12 +10,8 @@ import {
   Eye,
   EyeOff,
   CheckCircle2,
-  Plug,
-  Bot,
-  MessageSquare,
   Globe,
-  ChevronDown,
-  Loader2,
+  ExternalLink,
   Save,
   Check,
 } from 'lucide-react'
@@ -27,105 +23,36 @@ import {
   type ConfiguracaoApp,
 } from '@/lib/mock-data'
 
-// ——— Integracoes ———
-interface Integracao {
-  id: string
-  nome: string
-  descricao: string
-  status: 'conectado' | 'desconectado'
-  Icon: React.FC<{ className?: string; style?: React.CSSProperties }>
-  cor: string
-}
-
-const INTEGRACOES: Integracao[] = [
-  { id: 'evolution', nome: 'Evolution API', descricao: 'Automacao WhatsApp', status: 'desconectado', Icon: MessageSquare, cor: '#25d366' },
-  { id: 'telegram', nome: 'Telegram Bot', descricao: 'Notificacoes', status: 'desconectado', Icon: Bot, cor: '#2aabee' },
-  { id: 'n8n', nome: 'n8n / Webhook', descricao: 'Automacoes', status: 'desconectado', Icon: Globe, cor: '#f97316' },
-]
-
-// ——— Bloco de integracao ———
-function IntegracaoBloco({ integracao }: { integracao: Integracao }) {
-  const [status, setStatus] = useState(integracao.status)
-  const [loading, setLoading] = useState(false)
-  const [expanded, setExpanded] = useState(false)
-  const [token, setToken] = useState('')
-  const isConectado = status === 'conectado'
-
-  const handleConectar = async () => {
-    if (!token.trim()) return
-    setLoading(true)
-    await new Promise(r => setTimeout(r, 1000))
-    setStatus('conectado')
-    setLoading(false)
-    setExpanded(false)
-  }
-
+// ——— Card informativo: Painel 2 gerencia WhatsApp/Evolution ———
+function Painel2Card() {
   return (
-    <div 
-      className="rounded-xl p-4 transition-all"
-      style={{ 
-        background: 'rgba(255,255,255,0.02)', 
-        border: isConectado ? `1px solid ${integracao.cor}25` : '1px solid rgba(255,255,255,0.04)'
-      }}
+    <div
+      className="rounded-xl p-4 flex items-start gap-4"
+      style={{ background: 'rgba(37,99,235,0.05)', border: '1px solid rgba(37,99,235,0.14)' }}
     >
-      <div className="flex items-center gap-3">
-        <div 
-          className="h-10 w-10 rounded-xl flex items-center justify-center shrink-0"
-          style={{ background: `${integracao.cor}12` }}
-        >
-          <integracao.Icon className="h-5 w-5" style={{ color: integracao.cor }} />
-        </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-white">{integracao.nome}</p>
-          <p className="text-xs text-slate-500">{integracao.descricao}</p>
-        </div>
-        {isConectado ? (
-          <span className="text-[10px] font-medium px-2 py-1 rounded-full flex items-center gap-1" style={{ background: 'rgba(34,197,94,0.12)', color: '#22c55e' }}>
-            <Check className="h-3 w-3" />
-            Conectado
-          </span>
-        ) : (
-          <button
-            onClick={() => setExpanded(!expanded)}
-            className="h-8 px-3 rounded-lg text-xs font-medium flex items-center gap-1 transition-all"
-            style={{ background: `${integracao.cor}12`, color: integracao.cor }}
-          >
-            Configurar
-            <ChevronDown className={`h-3 w-3 transition-transform ${expanded ? 'rotate-180' : ''}`} />
-          </button>
-        )}
+      <div className="h-10 w-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: 'rgba(37,99,235,0.1)' }}>
+        <Globe className="h-5 w-5" style={{ color: '#60a5fa' }} />
       </div>
-
-      <AnimatePresence>
-        {expanded && !isConectado && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            className="overflow-hidden"
-          >
-            <div className="pt-4 mt-4 flex gap-2" style={{ borderTop: '1px solid rgba(255,255,255,0.04)' }}>
-              <input
-                type="text"
-                value={token}
-                onChange={e => setToken(e.target.value)}
-                placeholder="Token da API..."
-                className="flex-1 h-9 px-3 rounded-lg text-sm text-white outline-none"
-                style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}
-              />
-              <button
-                onClick={handleConectar}
-                disabled={loading || !token.trim()}
-                className="h-9 px-4 rounded-lg text-xs font-medium flex items-center gap-2 disabled:opacity-40"
-                style={{ background: `${integracao.cor}15`, color: integracao.cor }}
-              >
-                {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plug className="h-3.5 w-3.5" />}
-                {loading ? 'Conectando' : 'Conectar'}
-              </button>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-semibold text-white">WhatsApp / Evolution</p>
+        <p className="text-xs text-slate-500 mt-0.5">Automacoes, fluxos conversacionais e envio de midia sao gerenciados pelo Painel 2.</p>
+        <a
+          href="https://painel2.centralplayplus.com.br"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1.5 mt-2 text-xs font-medium transition-colors hover:opacity-80"
+          style={{ color: '#60a5fa' }}
+        >
+          <ExternalLink className="h-3.5 w-3.5" />
+          Abrir Painel 2
+        </a>
+      </div>
+      <span
+        className="text-[10px] font-semibold px-2 py-1 rounded-full shrink-0"
+        style={{ background: 'rgba(37,99,235,0.12)', color: '#93c5fd' }}
+      >
+        PAINEL 2
+      </span>
     </div>
   )
 }
@@ -217,15 +144,13 @@ export function ConfiguracoesPage() {
 
       {/* Conteudo em blocos */}
       <div className="w-full max-w-3xl space-y-8">
-        {/* Integracoes */}
+        {/* Integracoes externas — gerenciadas pelo Painel 2 */}
         <section>
           <div className="flex items-center gap-2 mb-4">
-            <Plug className="h-4 w-4 text-slate-400" />
-            <h2 className="text-sm font-medium text-white">Integracoes</h2>
+            <Globe className="h-4 w-4 text-slate-400" />
+            <h2 className="text-sm font-medium text-white">Integracoes externas</h2>
           </div>
-          <div className="space-y-2">
-            {INTEGRACOES.map(i => <IntegracaoBloco key={i.id} integracao={i} />)}
-          </div>
+          <Painel2Card />
         </section>
 
         {/* Paineis */}

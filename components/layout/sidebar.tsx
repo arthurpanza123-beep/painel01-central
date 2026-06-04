@@ -14,7 +14,8 @@ import {
   Terminal,
   LogOut,
   Kanban,
-  LayoutDashboard
+  LayoutDashboard,
+  ExternalLink,
 } from 'lucide-react'
 
 const NAV_ITEMS: { id: NavPage; label: string; Icon: React.FC<{ className?: string }> }[] = [
@@ -115,25 +116,51 @@ export function Sidebar({ activePage, onNavigate }: SidebarProps) {
         })}
       </nav>
 
-      {/* Bottom: Sair */}
-      <button
-        className="group relative flex h-10 w-10 items-center justify-center rounded-lg transition-all duration-200 text-[color:var(--sidebar-foreground)] hover:text-red-400 mt-2"
-        title="Sair"
-        aria-label="Sair"
-      >
-        <LogOut className="h-[18px] w-[18px]" />
-        <span
-          className="pointer-events-none absolute left-[calc(100%+10px)] z-50 whitespace-nowrap rounded-lg px-2.5 py-1.5 text-xs font-medium opacity-0 group-hover:opacity-100 transition-opacity duration-150"
-          style={{
-            background: '#1e2230',
-            border: '1px solid rgba(255,255,255,0.08)',
-            color: '#e2e8f0',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
-          }}
+      {/* Bottom: atalho Painel 2 + Sair */}
+      <div className="flex flex-col items-center gap-1 mt-2">
+        {/* Atalho Painel 2 */}
+        <a
+          href="https://painel2.centralplayplus.com.br"
+          target="_blank"
+          rel="noopener noreferrer"
+          title="Operacao em tempo real"
+          aria-label="Operacao em tempo real (Painel 2)"
+          className="group relative flex h-10 w-10 items-center justify-center rounded-lg transition-all duration-200 text-[color:var(--sidebar-foreground)] hover:text-blue-400"
         >
-          Sair
-        </span>
-      </button>
+          <ExternalLink className="h-[18px] w-[18px]" />
+          <span
+            className="pointer-events-none absolute left-[calc(100%+10px)] z-50 whitespace-nowrap rounded-lg px-2.5 py-1.5 text-xs font-medium opacity-0 group-hover:opacity-100 transition-opacity duration-150"
+            style={{
+              background: '#1e2230',
+              border: '1px solid rgba(255,255,255,0.08)',
+              color: '#e2e8f0',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+            }}
+          >
+            Operacao em tempo real
+          </span>
+        </a>
+
+        {/* Sair */}
+        <button
+          className="group relative flex h-10 w-10 items-center justify-center rounded-lg transition-all duration-200 text-[color:var(--sidebar-foreground)] hover:text-red-400"
+          title="Sair"
+          aria-label="Sair"
+        >
+          <LogOut className="h-[18px] w-[18px]" />
+          <span
+            className="pointer-events-none absolute left-[calc(100%+10px)] z-50 whitespace-nowrap rounded-lg px-2.5 py-1.5 text-xs font-medium opacity-0 group-hover:opacity-100 transition-opacity duration-150"
+            style={{
+              background: '#1e2230',
+              border: '1px solid rgba(255,255,255,0.08)',
+              color: '#e2e8f0',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+            }}
+          >
+            Sair
+          </span>
+        </button>
+      </div>
     </aside>
   )
 }

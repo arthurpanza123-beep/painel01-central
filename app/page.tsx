@@ -36,7 +36,7 @@ export default function App() {
       <main className="flex-1 min-w-0 overflow-y-auto">
         {page === 'dashboard'      && <DashboardPage onNavigate={setPage} />}
         {page === 'pipeline'       && <PipelinePage />}
-        {page === 'gerar-teste'    && <GerarTesteWizard />}
+        {page === 'gerar-teste'    && <GerarTesteWizard onNavigate={setPage} />}
         {page === 'testes'         && <TestesPage />}
         {page === 'clientes'       && <ClientesPage />}
         {page === 'contas'         && <ContasPage />}

@@ -844,6 +844,115 @@ export const MOCK_LOGS: LogEntry[] = [
   },
 ]
 
+// ===================== LOG SIMPLES (PAINEL 1) =====================
+// Apenas eventos permitidos no Painel 1.
+// WhatsApp, boas-vindas, audio e instalacao pertencem ao Painel 2.
+
+export type LogEventoTipo =
+  | 'TEST_CREATED'
+  | 'ACCESS_GENERATED'
+  | 'XCLOUD_DEVICE_ADDED'
+  | 'XCLOUD_DEVICE_ALREADY_EXISTS'
+  | 'XCLOUD_XTREAM_ATTACHED'
+  | 'XCLOUD_ACTIVATION_CONFIRMED'
+  | 'TEST_FAILED'
+  | 'CLIENT_ACTIVATED'
+  | 'ACCOUNT_SLOT_USED'
+  | 'RENEWAL_CREATED'
+
+export interface LogEvento {
+  id: string
+  evento: LogEventoTipo
+  clienteId?: string
+  clienteNome?: string
+  testeId?: string
+  app?: string
+  servidor?: string
+  detalhe?: string       // texto curto — sem tokens, senhas ou dispositivos completos
+  timestamp: string
+}
+
+export const MOCK_LOG_EVENTOS: LogEvento[] = [
+  {
+    id: 'log-1',
+    evento: 'TEST_CREATED',
+    clienteNome: 'João Silva',
+    app: 'Blessed Player',
+    servidor: 'Yellow Box',
+    testeId: '#4821',
+    detalhe: 'Teste criado com sucesso.',
+    timestamp: '04/06/2026 08:32:15',
+  },
+  {
+    id: 'log-2',
+    evento: 'ACCESS_GENERATED',
+    clienteNome: 'Maria Souza',
+    app: 'XCloud',
+    servidor: 'Ninety',
+    testeId: '#5933',
+    detalhe: 'Acesso gerado no painel gerador.',
+    timestamp: '04/06/2026 09:14:02',
+  },
+  {
+    id: 'log-3',
+    evento: 'XCLOUD_DEVICE_ADDED',
+    clienteNome: 'Maria Souza',
+    app: 'XCloud',
+    detalhe: 'Device adicionado com ativação imediata.',
+    timestamp: '04/06/2026 09:14:45',
+  },
+  {
+    id: 'log-4',
+    evento: 'XCLOUD_XTREAM_ATTACHED',
+    clienteNome: 'Maria Souza',
+    app: 'XCloud',
+    detalhe: 'Xtream vinculado. RELOAD confirmado.',
+    timestamp: '04/06/2026 09:15:10',
+  },
+  {
+    id: 'log-5',
+    evento: 'XCLOUD_ACTIVATION_CONFIRMED',
+    clienteNome: 'Maria Souza',
+    app: 'XCloud',
+    detalhe: 'Ativação XCloud concluída.',
+    timestamp: '04/06/2026 09:15:12',
+  },
+  {
+    id: 'log-6',
+    evento: 'CLIENT_ACTIVATED',
+    clienteNome: 'Pedro Alves',
+    app: 'Blessed Player',
+    servidor: 'Yellow Box',
+    detalhe: 'Tela ocupada na conta #3311.',
+    timestamp: '04/06/2026 10:00:00',
+  },
+  {
+    id: 'log-7',
+    evento: 'ACCOUNT_SLOT_USED',
+    clienteNome: 'Pedro Alves',
+    servidor: 'Yellow Box',
+    detalhe: 'Vaga livre aproveitada. Sem crédito extra.',
+    timestamp: '04/06/2026 10:00:01',
+  },
+  {
+    id: 'log-8',
+    evento: 'TEST_FAILED',
+    clienteNome: 'Lucas Rodrigues',
+    app: 'XCloud',
+    detalhe: 'Falha em XCLOUD_XTREAM_ATTACHED. Timeout.',
+    timestamp: '03/06/2026 16:02:45',
+  },
+  {
+    id: 'log-9',
+    evento: 'RENEWAL_CREATED',
+    clienteNome: 'Fernanda Costa',
+    app: 'PlaySim',
+    servidor: 'Yellow Box',
+    detalhe: 'Renovação mensal criada. Vence 04/07/2026.',
+    timestamp: '03/06/2026 20:15:00',
+  },
+]
+
 // ===================== MÉTRICAS CALCULADAS =====================
 
 export function calcularMetricasTestes() {
