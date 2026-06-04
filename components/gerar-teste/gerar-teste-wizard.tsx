@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   ArrowRight, ArrowLeft, Copy, CheckCircle,
   RotateCcw, ExternalLink, Loader2, AlertCircle, Check,
-  Keyboard, User, Phone, Zap, Server, ChevronDown,
+  Keyboard, User, Phone, Zap, Server, ChevronDown, RefreshCw,
 } from 'lucide-react'
 import { useToast } from '@/components/ui/toast'
 import { cn } from '@/lib/utils'
@@ -927,11 +927,12 @@ function StepConfirmar({ form, onBack, onGerar }: { form: FormData; onBack: () =
 
 // ─── Tela Gerando XCloud (3 workers orquestrados) ────────────────────────────
 
-function TelaGerandoXCloud({ form, workers, onRetry, onModoManual, onVerLog }: {
+function TelaGerandoXCloud({ form, workers, onRetry, onModoManual, onRecriarDevice, onVerLog }: {
   form: FormData
   workers: XcloudWorker[]
   onRetry: (step: XcloudWorker['id']) => void
   onModoManual: () => void
+  onRecriarDevice?: () => void
   onVerLog?: () => void
 }) {
   const srv = SERVIDORES.find(s => s.id === form.servidor)
@@ -1079,8 +1080,8 @@ function TelaGerandoXCloud({ form, workers, onRetry, onModoManual, onVerLog }: {
             <RotateCcw className="h-4 w-4" />
             Tentar novamente
           </button>
-          {/* Secundarios */}
-          <div className="grid grid-cols-2 gap-2">
+          {/* Secundarios — grid 3 colunas se onRecriarDevice presente, senao 2 */}
+          <div className={`grid gap-2 ${onRecriarDevice ? 'grid-cols-3' : 'grid-cols-2'}`}>
             <button
               onClick={onModoManual}
               className="h-10 rounded-xl text-sm font-medium flex items-center justify-center gap-1.5 transition-all"
@@ -1088,6 +1089,15 @@ function TelaGerandoXCloud({ form, workers, onRetry, onModoManual, onVerLog }: {
               <Keyboard className="h-3.5 w-3.5" />
               Modo manual
             </button>
+            {onRecriarDevice && (
+              <button
+                onClick={onRecriarDevice}
+                className="h-10 rounded-xl text-sm font-medium flex items-center justify-center gap-1.5 transition-all"
+                style={{ background: 'rgba(245,158,11,0.08)', color: '#fbbf24', border: '1px solid rgba(245,158,11,0.16)' }}>
+                <RefreshCw className="h-3.5 w-3.5" />
+                Recriar device
+              </button>
+            )}
             {onVerLog && (
               <button
                 onClick={onVerLog}
@@ -1709,6 +1719,12 @@ export function GerarTesteWizard({ onNavigate }: { onNavigate?: (p: NavPage) => 
                 workers={xcloudWorkers}
                 onRetry={handleRetryXcloudStep}
                 onModoManual={() => { setModoManualXcloud(true); setProcessStep('sucesso') }}
+                onRecriarDevice={() => {
+                  setXcloudWorkers(prev => prev.map(w =>
+                    w.id === 'dispositivo' ? { ...w, status: 'aguardando', subStepAtivo: -1, detail: undefined } : w
+                  ))
+                  handleRetryXcloudStep('dispositivo')
+                }}
                 onVerLog={() => onNavigate?.('debug')}
               />
             : <TelaGerando form={form} etapas={etapas} />
