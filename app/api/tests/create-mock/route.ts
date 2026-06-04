@@ -4,15 +4,15 @@
  * POST /api/tests/create-mock
  *
  * Gera um teste simulado e persiste no Supabase staging.
- * Se o Supabase não estiver configurado, retorna os dados
- * gerados com source: "mock" sem gravar nada.
+ * Se o Supabase não estiver configurado (ou qualquer insert falhar),
+ * retorna source:"mock" — NUNCA retorna source:"supabase" sem gravar de verdade.
  *
  * REGRAS:
  * - NÃO chama Ninety, Yellow, Brasil, XCloud, Evolution ou WhatsApp.
  * - NÃO gera teste real em painel externo.
  * - NÃO envia mensagem.
- * - Credenciais geradas são fake/simuladas.
- * - Senhas, usuários, M3U e device key são mascarados na resposta.
+ * - Credenciais são fake/simuladas.
+ * - Senhas, usuários, M3U e device_key são mascarados na resposta.
  *
  * Payload esperado (JSON):
  *   { nome: string, telefone: string, app: string, servidor: string }
@@ -20,18 +20,24 @@
  * Resposta de sucesso (200):
  *   { success: true, source: "supabase"|"mock", client, test, account }
  *
- * Resposta de erro (400 | 500):
+ * Resposta de erro (400):
  *   { success: false, error: string }
  *
- * Tabelas gravadas (quando Supabase disponível):
- *   clients, tests, accounts, account_slots, pipeline_events, logs
+ * Ordem de inserção quando Supabase disponível:
+ *   1. clients
+ *   2. accounts (sem source_test_id ainda)
+ *   3. tests (com account_id)
+ *   4. UPDATE accounts SET source_test_id
+ *   5. account_slots
+ *   6. pipeline_events
+ *   7. logs
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { getSupabaseServerClient, isSupabaseServerConfigured } from '@/lib/supabase/server'
+import { getSupabaseServerClient } from '@/lib/supabase/server'
 import { maskPassword, maskUsername } from '@/lib/services/masking'
 
-// ─── Helpers de geração fake ─────────────────────────────────────────────────
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function rand(n = 6): string {
   return Math.random().toString(36).substring(2, 2 + n).toUpperCase()
@@ -42,25 +48,39 @@ function gerarCredenciais(nome: string) {
   const usuario      = `usr_${primeiroNome}${Math.floor(Math.random() * 999)}`
   const senha        = `${rand(5)}${rand(5)}`.substring(0, 10)
   const codigo       = `#${String(Math.floor(Math.random() * 9000) + 1000)}`
-  const m3uBase      = 'http://srv.centralplay.tv'
-  const m3u          = `${m3uBase}/get.php?username=${usuario}&password=${senha}&type=m3u_plus`
+  const deviceKey    = `DEV-${rand(8)}`
+  const m3u          = `http://srv.centralplay.tv/get.php?username=${usuario}&password=${senha}&type=m3u_plus`
+  const hls          = `http://srv.centralplay.tv/live/${usuario}/${senha}`
   const validadeDate = new Date()
   validadeDate.setHours(validadeDate.getHours() + 2)
-  const validade = validadeDate.toISOString()
-  const validadeBR = validadeDate.toLocaleString('pt-BR', {
-    dateStyle: 'short',
-    timeStyle: 'short',
-  })
-  const agora = new Date().toISOString()
-  const hoje  = new Date().toLocaleDateString('pt-BR')
-  const hora  = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
-  return { usuario, senha, codigo, m3u, validade, validadeBR, agora, hoje, hora }
+  const expiresAt  = validadeDate.toISOString()
+  const validadeBR = validadeDate.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
+  const agora      = new Date().toISOString()
+  return { usuario, senha, codigo, deviceKey, m3u, hls, expiresAt, validadeBR, agora }
 }
 
-// ─── Handler principal ───────────────────────────────────────────────────────
+// Mapa de keys do wizard para normalização de app/panel
+const APP_KEYS: Record<string, string> = {
+  xcloud:         'xcloud',
+  blessed:        'blessed',
+  playsim:        'playsim',
+  assist_plus:    'assist_plus',
+  funplay:        'funplay',
+  magic_player:   'magic_player',
+}
+
+const PANEL_KEYS: Record<string, string> = {
+  ninety:              'ninety',
+  brasil_yellow:       'brasil_yellow',
+  uniplay:             'uniplay',
+  devxtop_magic:       'devxtop_magic',
+  xcloud_playwright:   'xcloud_playwright',
+}
+
+// ─── Handler ─────────────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
-  // 1. Parse e validação do payload
+  // 1. Parse e validação
   let body: { nome?: string; telefone?: string; app?: string; servidor?: string }
   try {
     body = await req.json()
@@ -76,168 +96,216 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  // 2. Gerar credenciais fake (não chama nenhuma API externa)
-  const cred = gerarCredenciais(nome)
+  // 2. Gerar credenciais fake — zero chamadas externas
+  const cred       = gerarCredenciais(nome)
+  const clientId   = crypto.randomUUID()
+  const testId     = crypto.randomUUID()
+  const accountId  = crypto.randomUUID()
 
-  // 3. Montar shapes das entidades
-  const clientId  = crypto.randomUUID()
-  const testId    = crypto.randomUUID()
-  const accountId = crypto.randomUUID()
-  const slotId    = crypto.randomUUID()
+  const appKey    = APP_KEYS[app]    ?? app
+  const panelKey  = PANEL_KEYS[servidor] ?? servidor
 
-  const clientRow = {
-    id:         clientId,
-    name:       nome.trim(),
-    phone:      telefone.trim(),
-    app,
-    server:     servidor,
-    plan:       'Teste 2h',
-    price:      0,
-    due_date:   cred.validade.split('T')[0],
-    username:   cred.usuario,
-    password:   cred.senha,           // armazenado em claro no staging; produção deve criptografar
-    status:     'ativo',
-    created_at: cred.agora,
-  }
-
-  const testRow = {
-    id:           testId,
-    client_name:  nome.trim(),
-    phone:        telefone.trim(),
-    app,
-    server:       servidor,
-    username:     cred.usuario,
-    password:     cred.senha,
-    code:         cred.codigo,
-    m3u_url:      cred.m3u,
-    status:       'ativo',
-    valid_until:  cred.validade,
-    created_at:   cred.agora,
-    created_date: cred.hoje,
-    created_time: cred.hora,
-  }
-
-  const accountRow = {
-    id:            accountId,
-    server:        servidor,
-    app,
-    code:          cred.codigo,
-    username:      cred.usuario,
-    password:      cred.senha,
-    main_client:   nome.trim(),
-    main_phone:    telefone.trim(),
-    due_date:      cred.validade.split('T')[0],
-    total_slots:   4,
-  }
-
-  const slotRow = {
-    id:         slotId,
-    account_id: accountId,
-    client_id:  clientId,
-    label:      'Tela 01',
-    occupied:   true,
-    username:   cred.usuario,
-    created_at: cred.agora,
-  }
-
-  const pipelineRow = {
-    id:         crypto.randomUUID(),
-    client_id:  clientId,
-    test_id:    testId,
-    name:       nome.trim(),
-    phone:      telefone.trim(),
-    app,
-    server:     servidor,
-    stage:      'teste_gerado',
-    created_at: cred.agora,
-    updated_at: cred.agora,
-  }
-
-  const logRow = {
-    id:        crypto.randomUUID(),
-    level:     'success',
-    message:   `Teste mock gerado para ${nome.trim()} | ${app} / ${servidor}`,
-    details:   `code=${cred.codigo} | valid_until=${cred.validade}`,
-    timestamp: cred.agora,
-    source:    'wizard',
-  }
-
-  // 4. Tentar gravar no Supabase; fallback silencioso se não configurado
+  // 3. Tentar gravar no Supabase na ordem correta
   const supabase = getSupabaseServerClient()
   let source: 'supabase' | 'mock' = 'mock'
 
-  if (supabase && isSupabaseServerConfigured) {
+  if (supabase) {
     try {
-      // Inserções em paralelo — falha silenciosa individual para não quebrar o fluxo
-      const [c, t, a, s, p, l] = await Promise.allSettled([
-        supabase.from('clients').insert(clientRow),
-        supabase.from('tests').insert(testRow),
-        supabase.from('accounts').insert(accountRow),
-        supabase.from('account_slots').insert(slotRow),
-        supabase.from('pipeline_events').insert(pipelineRow),
-        supabase.from('logs').insert(logRow),
+      // ── Passo 0: buscar app_id e panel_id nas tabelas de referência ─────────
+      // Se as tabelas apps/panels não existirem ainda, cai no fallback graciosamente.
+      let appId:   string | null = null
+      let panelId: string | null = null
+
+      const [appsRes, panelsRes] = await Promise.allSettled([
+        supabase.from('apps').select('id').eq('key', appKey).maybeSingle(),
+        supabase.from('panels').select('id').eq('key', panelKey).maybeSingle(),
       ])
 
-      // Log de diagnóstico — apenas no servidor, nunca exposto ao cliente
-      const failures = [c, t, a, s, p, l]
-        .map((r, i) => (r.status === 'rejected' ? `table[${i}]: ${r.reason}` : null))
-        .filter(Boolean)
-
-      if (failures.length === 0) {
-        source = 'supabase'
-      } else {
-        // Pelo menos uma tabela gravou ou nenhuma — ainda retorna sucesso com source=mock
-        console.error('[api/tests/create-mock] Falhas parciais no Supabase:', failures)
+      if (appsRes.status === 'fulfilled' && appsRes.value.data) {
+        appId = (appsRes.value.data as { id: string }).id
       }
+      if (panelsRes.status === 'fulfilled' && panelsRes.value.data) {
+        panelId = (panelsRes.value.data as { id: string }).id
+      }
+
+      // ── Passo 1: clients ────────────────────────────────────────────────────
+      const { error: clientErr } = await supabase.from('clients').insert({
+        id:     clientId,
+        name:   nome.trim(),
+        phone_e164: telefone.trim().replace(/\D/g, '').replace(/^(\d{2})/, '+$1'),
+        phone_raw:  telefone.trim(),
+        status: 'active',
+        source: 'wizard_mock',
+        legacy_metadata: {
+          app:     appKey,
+          panel:   panelKey,
+          app_id:  appId,
+          panel_id: panelId,
+        },
+      })
+
+      if (clientErr) throw new Error(`clients: ${clientErr.message}`)
+
+      // ── Passo 2: accounts (sem source_test_id ainda) ────────────────────────
+      const { error: accErr } = await supabase.from('accounts').insert({
+        id:               accountId,
+        client_id:        clientId,
+        source_test_id:   null,        // preenchido no passo 4
+        app_id:           appId,
+        panel_id:         panelId,
+        username:         cred.usuario,
+        password_secret:  cred.senha,  // produção deve criptografar com pgcrypto/vault
+        m3u_url_secret:   cred.m3u,
+        hls_url_secret:   cred.hls,
+        device_key:       cred.deviceKey,
+        provider:         panelKey,
+        provider_code:    cred.codigo,
+        max_slots:        4,
+        status:           'active',
+        activated_at:     cred.agora,
+        expires_at:       cred.expiresAt,
+        legacy_metadata: {
+          app:    appKey,
+          panel:  panelKey,
+        },
+      })
+
+      if (accErr) throw new Error(`accounts: ${accErr.message}`)
+
+      // ── Passo 3: tests (com account_id) ────────────────────────────────────
+      const { error: testErr } = await supabase.from('tests').insert({
+        id:           testId,
+        client_id:    clientId,
+        app_id:       appId,
+        panel_id:     panelId,
+        account_id:   accountId,
+        device_type:  'any',
+        device_key:   cred.deviceKey,
+        provider:     panelKey,
+        provider_code: cred.codigo,
+        status:       'active',
+        source:       'wizard_mock',
+        requested_at: cred.agora,
+        activated_at: cred.agora,
+        expires_at:   cred.expiresAt,
+        legacy_metadata: {
+          app:      appKey,
+          panel:    panelKey,
+          username: cred.usuario,
+          // senha omitida de propósito
+        },
+      })
+
+      if (testErr) throw new Error(`tests: ${testErr.message}`)
+
+      // ── Passo 4: atualizar accounts.source_test_id ──────────────────────────
+      const { error: updErr } = await supabase
+        .from('accounts')
+        .update({ source_test_id: testId })
+        .eq('id', accountId)
+
+      if (updErr) throw new Error(`accounts.update: ${updErr.message}`)
+
+      // ── Passo 5: account_slots ──────────────────────────────────────────────
+      const { error: slotErr } = await supabase.from('account_slots').insert({
+        id:          crypto.randomUUID(),
+        account_id:  accountId,
+        client_id:   clientId,
+        slot_number: 1,
+        status:      'active',
+        device_key:  cred.deviceKey,
+        assigned_at: cred.agora,
+        expires_at:  cred.expiresAt,
+        metadata:    { label: 'Tela 01', source: 'wizard_mock' },
+      })
+
+      if (slotErr) throw new Error(`account_slots: ${slotErr.message}`)
+
+      // ── Passo 6: pipeline_events ────────────────────────────────────────────
+      const { error: pipeErr } = await supabase.from('pipeline_events').insert({
+        id:           crypto.randomUUID(),
+        entity_type:  'test',
+        entity_id:    testId,
+        event_type:   'status_change',
+        from_status:  null,
+        to_status:    'active',
+        payload: {
+          client_id:   clientId,
+          account_id:  accountId,
+          app_id:      appId,
+          panel_id:    panelId,
+          provider:    panelKey,
+          source:      'wizard_mock',
+        },
+      })
+
+      if (pipeErr) throw new Error(`pipeline_events: ${pipeErr.message}`)
+
+      // ── Passo 7: logs ───────────────────────────────────────────────────────
+      const { error: logErr } = await supabase.from('logs').insert({
+        id:         crypto.randomUUID(),
+        scope:      'wizard',
+        level:      'info',
+        event:      'test.created.mock',
+        client_id:  clientId,
+        test_id:    testId,
+        account_id: accountId,
+        message:    `Teste mock criado para ${nome.trim()} | app=${appKey} panel=${panelKey}`,
+        metadata: {
+          provider_code: cred.codigo,
+          expires_at:    cred.expiresAt,
+          source:        'wizard_mock',
+        },
+      })
+
+      if (logErr) throw new Error(`logs: ${logErr.message}`)
+
+      // Todos os inserts passaram — é seguro dizer "supabase"
+      source = 'supabase'
+
     } catch (err) {
-      console.error('[api/tests/create-mock] Erro ao gravar no Supabase:', err)
-      // Fallback: continua com source = 'mock'
+      const msg = err instanceof Error ? err.message : String(err)
+      console.error('[api/tests/create-mock] Falha no Supabase, usando mock:', msg)
+      // source permanece 'mock' — não retorna "supabase" em caso de falha
     }
   }
 
-  // 5. Montar resposta — NUNCA expor senha ou M3U em claro
+  // 4. Montar resposta — NUNCA expor senha, m3u ou hls em claro
+  const mensagem = [
+    `Olá ${nome.trim()}! Segue seu teste de 2 horas:`,
+    ``,
+    `Aplicativo: ${appKey}`,
+    `Servidor: ${panelKey}`,
+    `Usuário: ${cred.usuario}`,
+    `Senha: ${cred.senha}`,
+    `Código: ${cred.codigo}`,
+    `Validade: ${cred.validadeBR}`,
+    ``,
+    `Qualquer dúvida é só chamar!`,
+  ].join('\n')
+
   return NextResponse.json({
     success: true,
     source,
     client: {
       id:     clientId,
-      name:   clientRow.name,
-      phone:  clientRow.phone,
-      app:    clientRow.app,
-      server: clientRow.server,
-      status: clientRow.status,
+      name:   nome.trim(),
+      status: 'active',
     },
     test: {
-      id:           testId,
-      code:         testRow.code,
-      username:     maskUsername(testRow.username),
-      password:     maskPassword(testRow.password),
-      // m3u_url: omitido intencionalmente — não expor no response
-      valid_until:  testRow.valid_until,
-      created_date: testRow.created_date,
-      created_time: testRow.created_time,
-      status:       testRow.status,
-      // validade formatada para exibição no wizard
-      validadeBR:   cred.validadeBR,
-      // mensagem pronta para copiar/WhatsApp — credenciais em claro apenas aqui
-      mensagem: [
-        `Olá ${nome.trim()}! Segue seu teste de 2 horas:`,
-        ``,
-        `Aplicativo: ${app}`,
-        `Servidor: ${servidor}`,
-        `Usuário: ${testRow.username}`,
-        `Senha: ${testRow.password}`,
-        `Código: ${testRow.code}`,
-        `Validade: ${cred.validadeBR}`,
-        ``,
-        `Qualquer dúvida é só chamar!`,
-      ].join('\n'),
+      id:          testId,
+      code:        cred.codigo,
+      username:    maskUsername(cred.usuario),
+      password:    maskPassword(cred.senha),
+      validadeBR:  cred.validadeBR,
+      expires_at:  cred.expiresAt,
+      status:      'active',
+      mensagem,
     },
     account: {
-      id:     accountId,
-      code:   accountRow.code,
-      server: accountRow.server,
-      app:    accountRow.app,
+      id:         accountId,
+      provider:   panelKey,
+      device_key: cred.deviceKey,
     },
   })
 }
