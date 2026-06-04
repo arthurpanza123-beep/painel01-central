@@ -29,6 +29,8 @@ interface XcloudWorker {
   subLabel: string
   status: XcloudWorkerStatus
   detail?: string
+  subSteps?: string[]        // subetapas visíveis apenas para 'dispositivo'
+  subStepAtivo?: number      // índice da subetapa em andamento (-1 = nenhuma)
 }
 
 interface FormData {
@@ -925,120 +927,177 @@ function StepConfirmar({ form, onBack, onGerar }: { form: FormData; onBack: () =
 
 // ─── Tela Gerando XCloud (3 workers orquestrados) ────────────────────────────
 
-function TelaGerandoXCloud({ form, workers, onRetry, onModoManual }: {
+function TelaGerandoXCloud({ form, workers, onRetry, onModoManual, onVerLog }: {
   form: FormData
   workers: XcloudWorker[]
   onRetry: (step: XcloudWorker['id']) => void
   onModoManual: () => void
+  onVerLog?: () => void
 }) {
   const srv = SERVIDORES.find(s => s.id === form.servidor)
 
-  const iconePorStatus = (s: XcloudWorkerStatus) => {
-    if (s === 'concluido')  return <CheckCircle className="h-5 w-5 text-white" strokeWidth={3} />
-    if (s === 'processando') return <div className="h-2.5 w-2.5 animate-pulse rounded-full bg-blue-400" />
-    if (s === 'falhou')     return <AlertCircle className="h-4.5 w-4.5 text-red-400" />
-    return <div className="h-2 w-2 rounded-full" style={{ background: 'rgba(255,255,255,0.1)' }} />
-  }
-
   const corBg = (s: XcloudWorkerStatus) => {
-    if (s === 'concluido')  return 'rgba(34,197,94,0.08)'
-    if (s === 'processando') return 'rgba(37,99,235,0.12)'
-    if (s === 'falhou')     return 'rgba(239,68,68,0.08)'
+    if (s === 'concluido')   return 'rgba(34,197,94,0.07)'
+    if (s === 'processando') return 'rgba(37,99,235,0.10)'
+    if (s === 'falhou')      return 'rgba(239,68,68,0.07)'
     return 'rgba(255,255,255,0.02)'
   }
   const corBorder = (s: XcloudWorkerStatus) => {
-    if (s === 'concluido')  return 'rgba(34,197,94,0.15)'
-    if (s === 'processando') return 'rgba(37,99,235,0.25)'
-    if (s === 'falhou')     return 'rgba(239,68,68,0.2)'
+    if (s === 'concluido')   return 'rgba(34,197,94,0.15)'
+    if (s === 'processando') return 'rgba(37,99,235,0.22)'
+    if (s === 'falhou')      return 'rgba(239,68,68,0.18)'
     return 'rgba(255,255,255,0.04)'
-  }
-  const corCircle = (s: XcloudWorkerStatus) => {
-    if (s === 'concluido')  return '#22c55e'
-    if (s === 'processando') return 'rgba(37,99,235,0.25)'
-    if (s === 'falhou')     return 'rgba(239,68,68,0.2)'
-    return 'rgba(255,255,255,0.04)'
-  }
-  const corTexto = (s: XcloudWorkerStatus) => {
-    if (s === 'concluido')  return '#86efac'
-    if (s === 'processando') return '#93c5fd'
-    if (s === 'falhou')     return '#f87171'
-    return '#475569'
   }
 
-  const temFalha = workers.some(w => w.status === 'falhou')
   const workerFalhou = workers.find(w => w.status === 'falhou')
+  const temFalha     = Boolean(workerFalhou)
 
   return (
     <div className="w-full max-w-md">
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="text-center mb-8">
-        <div className="relative mx-auto mb-6 flex h-28 w-28 items-center justify-center">
+      {/* Header */}
+      <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="mb-7 text-center">
+        <div className="relative mx-auto mb-5 flex h-24 w-24 items-center justify-center">
           <div className="absolute inset-0 rounded-full"
-            style={{ background: 'radial-gradient(circle, rgba(20,184,166,0.15) 0%, transparent 70%)', boxShadow: '0 0 60px rgba(20,184,166,0.25)', animation: 'linePulse 2s ease-in-out infinite' }} />
-          <div className="absolute h-24 w-24 rounded-full border-[3px] animate-spin"
-            style={{ borderColor: 'rgba(20,184,166,0.1)', borderTopColor: '#14b8a6', borderRightColor: 'rgba(20,184,166,0.4)', boxShadow: '0 0 30px rgba(20,184,166,0.4)', animationDuration: '1.4s' }} />
-          <div className="absolute h-16 w-16 rounded-full border-2 animate-spin"
-            style={{ borderColor: 'transparent', borderTopColor: 'rgba(34,197,94,0.5)', animationDuration: '2.2s', animationDirection: 'reverse' }} />
-          <Zap style={{ width: 30, height: 30, color: '#14b8a6' }} />
+            style={{ background: 'radial-gradient(circle, rgba(20,184,166,0.14) 0%, transparent 70%)', boxShadow: '0 0 48px rgba(20,184,166,0.22)', animation: 'linePulse 2s ease-in-out infinite' }} />
+          <div className="absolute h-20 w-20 rounded-full border-[3px] animate-spin"
+            style={{ borderColor: 'rgba(20,184,166,0.08)', borderTopColor: '#14b8a6', borderRightColor: 'rgba(20,184,166,0.35)', animationDuration: '1.4s' }} />
+          <div className="absolute h-13 w-13 rounded-full border-2 animate-spin"
+            style={{ borderColor: 'transparent', borderTopColor: 'rgba(34,197,94,0.45)', animationDuration: '2.4s', animationDirection: 'reverse' }} />
+          <Zap style={{ width: 26, height: 26, color: '#14b8a6' }} />
         </div>
-        <h2 className="mb-1 text-2xl font-bold text-white" style={{ fontFamily: 'var(--font-display)' }}>Gerando teste XCloud</h2>
+        <h2 className="mb-1 text-xl font-bold text-white" style={{ fontFamily: 'var(--font-display)' }}>
+          Gerando teste XCloud
+        </h2>
         <p className="text-sm text-muted-foreground">{form.nome} · {srv?.label ?? form.servidor}</p>
       </motion.div>
 
       {/* Workers */}
-      <div className="space-y-3 mb-6">
-        {workers.map((w, i) => (
-          <motion.div key={w.id} initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.1 }}
-            className="rounded-xl px-4 py-4 transition-all duration-300"
-            style={{ background: corBg(w.status), border: `1px solid ${corBorder(w.status)}` }}>
-            <div className="flex items-center gap-4">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-all duration-300"
-                style={{ background: corCircle(w.status), boxShadow: w.status === 'concluido' ? '0 0 16px rgba(34,197,94,0.5)' : w.status === 'processando' ? '0 0 16px rgba(59,130,246,0.4)' : 'none' }}>
-                {iconePorStatus(w.status)}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold transition-all duration-300" style={{ color: corTexto(w.status) }}>
-                  {w.label}
-                </p>
-                {w.detail && (
-                  <p className="mt-0.5 text-[11px] truncate" style={{ color: w.status === 'falhou' ? '#f87171' : '#475569' }}>
-                    {w.detail}
+      <div className="space-y-2.5 mb-5">
+        {workers.map((w, i) => {
+          const isDispositivo = w.id === 'dispositivo'
+          const subSteps      = w.subSteps ?? []
+          const subAtivo      = w.subStepAtivo ?? -1
+          const expandido     = isDispositivo && (w.status === 'processando' || w.status === 'concluido' || w.status === 'falhou')
+
+          return (
+            <motion.div
+              key={w.id}
+              initial={{ opacity: 0, x: -16 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: i * 0.08 }}
+              className="rounded-xl overflow-hidden transition-all duration-300"
+              style={{ background: corBg(w.status), border: `1px solid ${corBorder(w.status)}` }}
+            >
+              {/* Linha principal do worker */}
+              <div className="flex items-center gap-3 px-4 py-3.5">
+                {/* Indicador de status */}
+                <div className="relative flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-all duration-300"
+                  style={{
+                    background: w.status === 'concluido' ? 'rgba(34,197,94,0.15)' : w.status === 'processando' ? 'rgba(37,99,235,0.15)' : w.status === 'falhou' ? 'rgba(239,68,68,0.12)' : 'rgba(255,255,255,0.04)',
+                    boxShadow: w.status === 'concluido' ? '0 0 12px rgba(34,197,94,0.4)' : w.status === 'processando' ? '0 0 12px rgba(59,130,246,0.35)' : 'none',
+                  }}>
+                  {w.status === 'concluido'   && <Check className="h-3.5 w-3.5 text-emerald-400" strokeWidth={3} />}
+                  {w.status === 'processando' && <div className="h-2 w-2 animate-pulse rounded-full bg-blue-400" />}
+                  {w.status === 'falhou'      && <AlertCircle className="h-3.5 w-3.5 text-red-400" />}
+                  {w.status === 'aguardando'  && <div className="h-1.5 w-1.5 rounded-full" style={{ background: 'rgba(255,255,255,0.12)' }} />}
+                </div>
+
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold leading-tight"
+                    style={{ color: w.status === 'concluido' ? '#86efac' : w.status === 'processando' ? '#93c5fd' : w.status === 'falhou' ? '#f87171' : '#475569' }}>
+                    {w.label}
                   </p>
+                  {!expandido && w.status !== 'aguardando' && (
+                    <p className="text-[11px] mt-0.5" style={{ color: w.status === 'falhou' ? '#f87171' : '#334155' }}>
+                      {w.status === 'falhou' ? 'Device nao ficou pronta para vincular Xtream' : w.subLabel}
+                    </p>
+                  )}
+                </div>
+
+                {w.status === 'processando' && (
+                  <div className="h-3.5 w-3.5 rounded-full border-2 animate-spin shrink-0"
+                    style={{ borderColor: 'rgba(59,130,246,0.18)', borderTopColor: '#3b82f6' }} />
                 )}
-                {!w.detail && w.status !== 'aguardando' && (
-                  <p className="mt-0.5 text-[11px] text-slate-600">{w.subLabel}</p>
+                {w.status === 'concluido' && (
+                  <span className="text-[10px] font-bold text-emerald-500 shrink-0 uppercase tracking-wide">OK</span>
                 )}
               </div>
-              {w.status === 'processando' && (
-                <div className="h-4 w-4 rounded-full border-2 animate-spin shrink-0" style={{ borderColor: 'rgba(59,130,246,0.2)', borderTopColor: '#3b82f6' }} />
+
+              {/* Subetapas expandidas (apenas worker dispositivo) */}
+              {expandido && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.25 }}
+                  className="overflow-hidden"
+                >
+                  <div className="px-4 pb-3.5 pt-0">
+                    <div className="ml-[calc(28px+12px)] space-y-1.5">
+                      {subSteps.map((step, si) => {
+                        const concluida  = w.status === 'concluido' || si < subAtivo
+                        const ativa      = w.status === 'processando' && si === subAtivo
+                        const futura     = !concluida && !ativa
+                        return (
+                          <div key={step} className="flex items-center gap-2">
+                            <div className="h-3.5 w-3.5 shrink-0 flex items-center justify-center rounded-full transition-all duration-200"
+                              style={{ background: concluida ? 'rgba(34,197,94,0.18)' : ativa ? 'rgba(59,130,246,0.18)' : 'rgba(255,255,255,0.04)' }}>
+                              {concluida && <Check className="h-2 w-2 text-emerald-400" strokeWidth={3.5} />}
+                              {ativa     && <div className="h-1.5 w-1.5 rounded-full bg-blue-400 animate-pulse" />}
+                              {futura    && <div className="h-1 w-1 rounded-full" style={{ background: 'rgba(255,255,255,0.1)' }} />}
+                            </div>
+                            <span className="text-[11px] transition-all duration-200"
+                              style={{ color: concluida ? '#4ade80' : ativa ? '#93c5fd' : '#334155' }}>
+                              {step}
+                            </span>
+                          </div>
+                        )
+                      })}
+                      {w.status === 'falhou' && (
+                        <p className="mt-1 text-[11px] font-medium" style={{ color: '#f87171' }}>
+                          Device nao ficou pronta para vincular Xtream
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </motion.div>
               )}
-              {w.status === 'concluido' && (
-                <span className="text-[11px] font-bold text-emerald-400 shrink-0">OK</span>
-              )}
-              {w.status === 'falhou' && (
-                <button onClick={() => onRetry(w.id)}
-                  className="shrink-0 h-7 px-3 rounded-lg text-[11px] font-semibold transition-all"
-                  style={{ background: 'rgba(239,68,68,0.1)', color: '#f87171', border: '1px solid rgba(239,68,68,0.2)' }}>
-                  Tentar novamente
-                </button>
-              )}
-            </div>
-          </motion.div>
-        ))}
+            </motion.div>
+          )
+        })}
       </div>
 
-      {/* Ações quando falha */}
+      {/* Acoes quando falha */}
       {temFalha && (
-        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="flex gap-2">
-          <button onClick={() => onRetry(workerFalhou!.id)}
-            className="flex-1 h-11 rounded-xl text-sm font-semibold flex items-center justify-center gap-2"
-            style={{ background: 'rgba(239,68,68,0.1)', color: '#f87171', border: '1px solid rgba(239,68,68,0.2)' }}>
-            <RotateCcw className="h-4 w-4" /> Tentar novamente ({workerFalhou?.label})
+        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
+          className="space-y-2">
+          {/* Retry — destaque */}
+          <button
+            onClick={() => onRetry(workerFalhou!.id)}
+            className="w-full h-11 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all"
+            style={{ background: 'rgba(37,99,235,0.12)', color: '#93c5fd', border: '1px solid rgba(37,99,235,0.2)' }}>
+            <RotateCcw className="h-4 w-4" />
+            Tentar novamente
           </button>
-          <button onClick={onModoManual}
-            className="h-11 px-4 rounded-xl text-sm font-medium"
-            style={{ background: 'rgba(255,255,255,0.04)', color: '#64748b', border: '1px solid rgba(255,255,255,0.07)' }}>
-            Manual
-          </button>
+          {/* Secundarios */}
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={onModoManual}
+              className="h-10 rounded-xl text-sm font-medium flex items-center justify-center gap-1.5 transition-all"
+              style={{ background: 'rgba(255,255,255,0.04)', color: '#64748b', border: '1px solid rgba(255,255,255,0.07)' }}>
+              <Keyboard className="h-3.5 w-3.5" />
+              Modo manual
+            </button>
+            {onVerLog && (
+              <button
+                onClick={onVerLog}
+                className="h-10 rounded-xl text-sm font-medium flex items-center justify-center gap-1.5 transition-all"
+                style={{ background: 'rgba(255,255,255,0.04)', color: '#64748b', border: '1px solid rgba(255,255,255,0.07)' }}>
+                <Server className="h-3.5 w-3.5" />
+                Ver log
+              </button>
+            )}
+          </div>
         </motion.div>
       )}
     </div>
@@ -1371,11 +1430,23 @@ export function GerarTesteWizard({ onNavigate }: { onNavigate?: (p: NavPage) => 
   const [modoManualXcloud, setModoManualXcloud] = useState(false)
 
   // XCloud workers state
-  const [xcloudWorkers, setXcloudWorkers] = useState<XcloudWorker[]>([
-    { id: 'acesso',      label: 'Gerando acesso',      subLabel: 'Painel gerador → credenciais Xtream',    status: 'aguardando' },
-    { id: 'dispositivo', label: 'Adicionando aparelho', subLabel: 'XCloud Devices → Device Key',            status: 'aguardando' },
-    { id: 'xtream',      label: 'Vinculando XCloud',   subLabel: 'Custom Playlist → Xtream Credentials',   status: 'aguardando' },
-  ])
+  const WORKERS_INIT: XcloudWorker[] = [
+    { id: 'acesso',      label: 'Gerando acesso',       subLabel: 'Credenciais Xtream no painel gerador', status: 'aguardando' },
+    {
+      id: 'dispositivo', label: 'Adicionando aparelho',  subLabel: 'Validando device no XCloud',          status: 'aguardando',
+      subSteps: [
+        'Device enviada',
+        'Atualizando lista',
+        'Device encontrada',
+        'Status Active confirmado',
+        'Playlist vazia confirmada',
+        'Pronto para vincular Xtream',
+      ],
+      subStepAtivo: -1,
+    },
+    { id: 'xtream',      label: 'Vinculando XCloud',    subLabel: 'Custom Playlist via Xtream Credentials', status: 'aguardando' },
+  ]
+  const [xcloudWorkers, setXcloudWorkers] = useState<XcloudWorker[]>(WORKERS_INIT)
   const { addToast } = useToast()
 
   // Smart STB tem painel mas precisa de extra (usuário+senha)
@@ -1434,17 +1505,42 @@ export function GerarTesteWizard({ onNavigate }: { onNavigate?: (p: NavPage) => 
     const etapasBase = getEtapas(form.app)
     const timers: ReturnType<typeof setTimeout>[] = []
 
-    // XCloud: anima os 3 workers em sequencia com dependencia
+    // XCloud: anima os 3 workers em sequencia, com subetapas no worker 'dispositivo'
     if (form.app === 'xcloud') {
-      const workerIds: XcloudWorker['id'][] = ['acesso', 'dispositivo', 'xtream']
-      workerIds.forEach((id, i) => {
+      // Worker 1 — acesso (inicia logo)
+      timers.push(setTimeout(() => {
+        setXcloudWorkers(prev => prev.map(w => w.id === 'acesso' ? { ...w, status: 'processando' } : w))
+      }, 0))
+      timers.push(setTimeout(() => {
+        setXcloudWorkers(prev => prev.map(w => w.id === 'acesso' ? { ...w, status: 'concluido' } : w))
+      }, 900))
+
+      // Worker 2 — dispositivo com 6 subetapas (inicia em t=1100)
+      const BASE_DISP = 1100
+      const INTERVALO = 420 // ms por subetapa
+      timers.push(setTimeout(() => {
+        setXcloudWorkers(prev => prev.map(w => w.id === 'dispositivo' ? { ...w, status: 'processando', subStepAtivo: 0 } : w))
+      }, BASE_DISP))
+      for (let i = 0; i < 6; i++) {
+        const t = BASE_DISP + i * INTERVALO
         timers.push(setTimeout(() => {
-          setXcloudWorkers(prev => prev.map(w => w.id === id ? { ...w, status: 'processando' } : w))
-        }, i * 1100))
-        timers.push(setTimeout(() => {
-          setXcloudWorkers(prev => prev.map(w => w.id === id ? { ...w, status: 'concluido', detail: id === 'acesso' ? 'Credenciais Xtream geradas.' : id === 'dispositivo' ? 'Device adicionado com ativacao imediata.' : 'Xtream vinculado. RELOAD confirmado.' } : w))
-        }, i * 1100 + 900))
-      })
+          setXcloudWorkers(prev => prev.map(w =>
+            w.id === 'dispositivo' ? { ...w, subStepAtivo: i } : w
+          ))
+        }, t))
+      }
+      timers.push(setTimeout(() => {
+        setXcloudWorkers(prev => prev.map(w => w.id === 'dispositivo' ? { ...w, status: 'concluido', subStepAtivo: 6 } : w))
+      }, BASE_DISP + 6 * INTERVALO))
+
+      // Worker 3 — xtream (inicia depois que dispositivo termina)
+      const BASE_XTREAM = BASE_DISP + 6 * INTERVALO + 200
+      timers.push(setTimeout(() => {
+        setXcloudWorkers(prev => prev.map(w => w.id === 'xtream' ? { ...w, status: 'processando' } : w))
+      }, BASE_XTREAM))
+      timers.push(setTimeout(() => {
+        setXcloudWorkers(prev => prev.map(w => w.id === 'xtream' ? { ...w, status: 'concluido' } : w))
+      }, BASE_XTREAM + 900))
     }
 
     etapasBase.forEach((_, i) => {
@@ -1590,12 +1686,8 @@ export function GerarTesteWizard({ onNavigate }: { onNavigate?: (p: NavPage) => 
   const reset = () => {
     setForm({ nome: '', telefone: '', app: '', servidor: '', deviceKey: '', manualUser: '', manualPass: '', manualCode: '', manualHost: '', manualText: '' })
     setWizardStep('dados'); setProcessStep(null); setEtapas([]); setTeste(null)
-    setDirection(1); setMostrarServidores(false); setModoManualXcloud(false)
-    setXcloudWorkers([
-      { id: 'acesso',      label: 'Gerando acesso',      subLabel: 'Painel gerador → credenciais Xtream',  status: 'aguardando' },
-      { id: 'dispositivo', label: 'Adicionando aparelho', subLabel: 'XCloud Devices → Device Key',          status: 'aguardando' },
-      { id: 'xtream',      label: 'Vinculando XCloud',   subLabel: 'Custom Playlist → Xtream Credentials', status: 'aguardando' },
-    ])
+    setDirection(1); setMostrarServidores(false);     setModoManualXcloud(false)
+    setXcloudWorkers(WORKERS_INIT)
   }
 
   const handleRetryXcloudStep = (stepId: XcloudWorker['id']) => {
@@ -1617,6 +1709,7 @@ export function GerarTesteWizard({ onNavigate }: { onNavigate?: (p: NavPage) => 
                 workers={xcloudWorkers}
                 onRetry={handleRetryXcloudStep}
                 onModoManual={() => { setModoManualXcloud(true); setProcessStep('sucesso') }}
+                onVerLog={() => onNavigate?.('debug')}
               />
             : <TelaGerando form={form} etapas={etapas} />
           }
