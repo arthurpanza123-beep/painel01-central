@@ -15,7 +15,12 @@
  * - Senhas, usuários, M3U e device_key são mascarados na resposta.
  *
  * Payload esperado (JSON):
- *   { nome: string, telefone: string, app: string, servidor: string }
+ *   {
+ *     nome: string, telefone: string, app: string, servidor: string,
+ *     deviceKey?: string,
+ *     manualFields?: { user: string, pass: string, code: string, host: string, text: string },
+ *     connection_type?: 'xtream' | 'standard'
+ *   }
  *
  * Resposta de sucesso (200):
  *   { success: true, source: "supabase"|"mock", client, test, account }
@@ -81,29 +86,56 @@ const PANEL_KEYS: Record<string, string> = {
 
 export async function POST(req: NextRequest) {
   // 1. Parse e validação
-  let body: { nome?: string; telefone?: string; app?: string; servidor?: string }
+  let body: {
+    nome?: string
+    telefone?: string
+    app?: string
+    servidor?: string
+    deviceKey?: string
+    manualFields?: { user?: string; pass?: string; code?: string; host?: string; text?: string }
+    connection_type?: 'xtream' | 'standard'
+  }
   try {
     body = await req.json()
   } catch {
     return NextResponse.json({ success: false, error: 'Payload inválido.' }, { status: 400 })
   }
 
-  const { nome, telefone, app, servidor } = body
-  if (!nome?.trim() || !telefone?.trim() || !app?.trim() || !servidor?.trim()) {
+  const { nome, telefone, app, servidor, deviceKey, manualFields, connection_type } = body
+  if (!nome?.trim() || !telefone?.trim() || !app?.trim()) {
     return NextResponse.json(
-      { success: false, error: 'Campos obrigatórios: nome, telefone, app, servidor.' },
+      { success: false, error: 'Campos obrigatórios: nome, telefone, app.' },
+      { status: 400 },
+    )
+  }
+
+  // Para apps que não sejam manual, servidor é obrigatório
+  const isManual = app === 'manual'
+  if (!isManual && !servidor?.trim()) {
+    return NextResponse.json(
+      { success: false, error: 'Campo obrigatório: servidor.' },
       { status: 400 },
     )
   }
 
   // 2. Gerar credenciais fake — zero chamadas externas
   const cred       = gerarCredenciais(nome)
+  // Se XCloud, usar deviceKey informado; senão gerar
+  const finalDeviceKey = deviceKey?.trim() || cred.deviceKey
   const clientId   = crypto.randomUUID()
   const testId     = crypto.randomUUID()
   const accountId  = crypto.randomUUID()
 
   const appKey    = APP_KEYS[app]    ?? app
-  const panelKey  = PANEL_KEYS[servidor] ?? servidor
+  const panelKey  = PANEL_KEYS[servidor ?? ''] ?? (servidor ?? 'manual')
+
+  // Para modo manual, usar campos informados ou fallback gerado
+  const finalUsuario = isManual ? (manualFields?.user?.trim() || cred.usuario) : cred.usuario
+  const finalSenha   = isManual ? (manualFields?.pass?.trim() || cred.senha)   : cred.senha
+  const finalCodigo  = isManual ? (manualFields?.code?.trim() || cred.codigo)  : cred.codigo
+  const finalHost    = isManual ? (manualFields?.host?.trim() || 'http://painel.exemplo.tv') : 'http://srv.centralplay.tv'
+
+  const isXCloud = app === 'xcloud'
 
   // 3. Tentar gravar no Supabase na ordem correta
   const supabase = getSupabaseServerClient()
@@ -270,19 +302,54 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // 4. Montar resposta — NUNCA expor senha, m3u ou hls em claro
-  const mensagem = [
-    `Olá ${nome.trim()}! Segue seu teste de 2 horas:`,
-    ``,
-    `Aplicativo: ${appKey}`,
-    `Servidor: ${panelKey}`,
-    `Usuário: ${cred.usuario}`,
-    `Senha: ${cred.senha}`,
-    `Código: ${cred.codigo}`,
-    `Validade: ${cred.validadeBR}`,
-    ``,
-    `Qualquer dúvida é só chamar!`,
-  ].join('\n')
+  // 4. Montar mensagem por tipo de app — NUNCA expor senha em claro além desta camada
+  let mensagem = ''
+  if (isManual && manualFields?.text?.trim()) {
+    mensagem = manualFields.text.trim()
+  } else if (isXCloud) {
+    mensagem = [
+      `Olá ${nome.trim()}! Segue seu teste de 2 horas:`,
+      ``,
+      `App: XCloud`,
+      `Host: ${finalHost}`,
+      `Usuário: ${finalUsuario}`,
+      `Senha: ${finalSenha}`,
+      `Validade: ${cred.validadeBR}`,
+      ``,
+      ...(finalDeviceKey ? [`Chave do dispositivo: ${finalDeviceKey}`] : []),
+      ``,
+      `Qualquer dúvida é só chamar!`,
+    ].filter(Boolean).join('\n')
+  } else if (isManual) {
+    const appLabel = 'Manual'
+    mensagem = [
+      `Olá ${nome.trim()}! Segue seu acesso:`,
+      ``,
+      `App: ${appLabel}`,
+      ...(finalHost ? [`Host: ${finalHost}`] : []),
+      `Usuário: ${finalUsuario}`,
+      `Senha: ${finalSenha}`,
+      `Código: ${finalCodigo}`,
+      `Validade: ${cred.validadeBR}`,
+      ``,
+      `Qualquer dúvida é só chamar!`,
+    ].join('\n')
+  } else {
+    const appLabel = appKey
+    const srvLabel = panelKey
+    mensagem = [
+      `Olá ${nome.trim()}! Segue seu teste de 2 horas:`,
+      ``,
+      `App: ${appLabel}`,
+      `Servidor: ${srvLabel}`,
+      `Código: ${finalCodigo}`,
+      `Usuário: ${finalUsuario}`,
+      `Senha: ${finalSenha}`,
+      `Validade: ${cred.validadeBR}`,
+      ``,
+      `Qualquer dúvida é só chamar!`,
+    ].join('\n')
+  }
 
   return NextResponse.json({
     success: true,
@@ -294,9 +361,11 @@ export async function POST(req: NextRequest) {
     },
     test: {
       id:          testId,
-      code:        cred.codigo,
-      username:    maskUsername(cred.usuario),
-      password:    maskPassword(cred.senha),
+      code:        finalCodigo,
+      username:    maskUsername(finalUsuario),
+      password:    maskPassword(finalSenha),
+      xtream_host: finalHost,
+      device_key:  isXCloud ? finalDeviceKey : undefined,
       validadeBR:  cred.validadeBR,
       expires_at:  cred.expiresAt,
       status:      'active',
@@ -305,7 +374,7 @@ export async function POST(req: NextRequest) {
     account: {
       id:         accountId,
       provider:   panelKey,
-      device_key: cred.deviceKey,
+      device_key: finalDeviceKey,
     },
   })
 }
