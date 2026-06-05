@@ -5,6 +5,7 @@ import dynamic from 'next/dynamic'
 
 const GerarTesteWizard    = dynamic(() => import('@/components/gerar-teste/gerar-teste-wizard').then(m => ({ default: m.GerarTesteWizard })), { ssr: false })
 const TestesPage           = dynamic(() => import('@/components/pages/testes-page').then(m => ({ default: m.TestesPage })), { ssr: false })
+const AtivarClientesPage   = dynamic(() => import('@/components/pages/ativar-clientes-page').then(m => ({ default: m.AtivarClientesPage })), { ssr: false })
 const ClientesPage         = dynamic(() => import('@/components/pages/clientes-page').then(m => ({ default: m.ClientesPage })), { ssr: false })
 const ContasPage           = dynamic(() => import('@/components/pages/contas-page').then(m => ({ default: m.ContasPage })), { ssr: false })
 const RenovacoesPage       = dynamic(() => import('@/components/pages/renovacoes-page').then(m => ({ default: m.RenovacoesPage })), { ssr: false })
@@ -21,6 +22,7 @@ export type NavPage =
   | 'pipeline'
   | 'gerar-teste' 
   | 'testes' 
+  | 'ativar-clientes'
   | 'clientes' 
   | 'contas' 
   | 'renovacoes' 
@@ -49,6 +51,7 @@ export default function App() {
         {page === 'pipeline'       && <PipelinePage />}
         {page === 'gerar-teste'    && <GerarTesteWizard />}
         {page === 'testes'         && <TestesPage />}
+        {page === 'ativar-clientes' && <AtivarClientesPage />}
         {page === 'clientes'       && <ClientesPage />}
         {page === 'contas'         && <ContasPage />}
         {page === 'renovacoes'     && <RenovacoesPage />}

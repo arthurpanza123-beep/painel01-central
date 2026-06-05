@@ -38,7 +38,7 @@ interface Integracao {
 }
 
 const INTEGRACOES: Integracao[] = [
-  { id: 'evolution', nome: 'Evolution API', descricao: 'Automacao WhatsApp', status: 'desconectado', Icon: MessageSquare, cor: '#25d366' },
+  { id: 'evolution', nome: 'Evolution API', descricao: 'Mensagens ficam no Painel 2', status: 'desconectado', Icon: MessageSquare, cor: '#25d366' },
   { id: 'telegram', nome: 'Telegram Bot', descricao: 'Notificacoes', status: 'desconectado', Icon: Bot, cor: '#2aabee' },
   { id: 'n8n', nome: 'n8n / Webhook', descricao: 'Automacoes', status: 'desconectado', Icon: Globe, cor: '#f97316' },
 ]

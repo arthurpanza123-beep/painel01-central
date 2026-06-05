@@ -11,7 +11,9 @@ type ActivationInput = {
     phone?: string
   }
   app_id?: string
+  app_key?: string
   panel_id?: string
+  panel_key?: string
   plan_key?: string
   amount_cents?: number
   amount?: number
@@ -249,15 +251,19 @@ async function resolveContext(input: ActivationInput): Promise<ActivationContext
   }
 
   const appId = input.app_id || test?.app_id || accountDefaults?.app_id
-  if (!appId) throw new ActivationError(400, 'APP_REQUIRED', 'app_id e obrigatorio quando o teste nao informa app.')
-  const { data: appData, error: appError } = await database.from('apps').select('id,key,name').eq('id', appId).maybeSingle()
+  if (!appId && !input.app_key) throw new ActivationError(400, 'APP_REQUIRED', 'app_id/app_key e obrigatorio quando o teste nao informa app.')
+  let appQuery = database.from('apps').select('id,key,name')
+  appQuery = appId ? appQuery.eq('id', appId) : appQuery.eq('key', input.app_key)
+  const { data: appData, error: appError } = await appQuery.maybeSingle()
   if (appError) throw new ActivationError(500, 'APP_LOOKUP_FAILED', appError.message)
   if (!appData) throw new ActivationError(404, 'APP_NOT_FOUND', 'App nao encontrado.')
 
   const panelId = input.panel_id || test?.panel_id || accountDefaults?.panel_id
   let panel: PanelRow | null = null
-  if (panelId) {
-    const { data: panelData, error: panelError } = await database.from('panels').select('id,key,name').eq('id', panelId).maybeSingle()
+  if (panelId || input.panel_key) {
+    let panelQuery = database.from('panels').select('id,key,name')
+    panelQuery = panelId ? panelQuery.eq('id', panelId) : panelQuery.eq('key', input.panel_key)
+    const { data: panelData, error: panelError } = await panelQuery.maybeSingle()
     if (panelError) throw new ActivationError(500, 'PANEL_LOOKUP_FAILED', panelError.message)
     if (!panelData) throw new ActivationError(404, 'PANEL_NOT_FOUND', 'Painel nao encontrado.')
     panel = panelData as PanelRow
@@ -407,7 +413,9 @@ export async function getActivationRecommendation(input: {
   client_id?: string
   test_id?: string
   app_id?: string
+  app_key?: string
   panel_id?: string
+  panel_key?: string
   account_id?: string
   slot_id?: string
   slot_number?: number
@@ -416,7 +424,9 @@ export async function getActivationRecommendation(input: {
     client_id: input.client_id,
     test_id: input.test_id,
     app_id: input.app_id,
+    app_key: input.app_key,
     panel_id: input.panel_id,
+    panel_key: input.panel_key,
     account_id: input.account_id,
   })
   const found = await findFreeSlot(context.app.id, context.panel?.id || null, input)

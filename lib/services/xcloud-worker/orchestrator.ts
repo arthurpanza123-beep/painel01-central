@@ -185,7 +185,7 @@ async function updateTestMetadata(test: XcloudResolvedTest, patch: JsonRecord) {
   if (error) throw new XcloudWorkerError(500, 'XCLOUD_TEST_UPDATE_FAILED', error.message, 'GenerateAccess')
 }
 
-async function resolveFromTestId(testId: string): Promise<XcloudResolvedTest> {
+async function resolveFromTestId(testId: string, requiresXtream: boolean): Promise<XcloudResolvedTest> {
   const database = db()
   const { data: testData, error: testError } = await database
     .from('tests')
@@ -209,7 +209,7 @@ async function resolveFromTestId(testId: string): Promise<XcloudResolvedTest> {
   const deviceKey = String(test.device_key || metadataValue(metadata, 'device_key') || '').trim()
 
   if (!deviceKey) throw new XcloudWorkerError(400, 'DEVICE_KEY_REQUIRED', 'device_key e obrigatoria para XCloud.', 'GenerateAccess')
-  if (!host || !username || !password) throw new XcloudWorkerError(400, 'XTREAM_REQUIRED', 'Teste nao tem host/username/password para vincular no XCloud.', 'GenerateAccess')
+  if (requiresXtream && (!host || !username || !password)) throw new XcloudWorkerError(400, 'XTREAM_REQUIRED', 'Teste nao tem host/username/password para vincular no XCloud.', 'GenerateAccess')
 
   return {
     test_id: test.id,
@@ -223,13 +223,13 @@ async function resolveFromTestId(testId: string): Promise<XcloudResolvedTest> {
   }
 }
 
-async function resolveDirect(input: XcloudWorkerInput): Promise<XcloudResolvedTest> {
+async function resolveDirect(input: XcloudWorkerInput, requiresXtream: boolean): Promise<XcloudResolvedTest> {
   const deviceKey = String(input.device_key || '').trim()
   const host = String(input.host || '').trim()
   const username = String(input.username || '').trim()
   const password = String(input.password || '').trim()
   if (!deviceKey) throw new XcloudWorkerError(400, 'DEVICE_KEY_REQUIRED', 'device_key e obrigatoria para XCloud.', 'GenerateAccess')
-  if (!host || !username || !password) throw new XcloudWorkerError(400, 'XTREAM_REQUIRED', 'Informe host, username e password.', 'GenerateAccess')
+  if (requiresXtream && (!host || !username || !password)) throw new XcloudWorkerError(400, 'XTREAM_REQUIRED', 'Informe host, username e password.', 'GenerateAccess')
   return {
     test_id: null,
     client_id: null,
@@ -242,9 +242,9 @@ async function resolveDirect(input: XcloudWorkerInput): Promise<XcloudResolvedTe
   }
 }
 
-async function resolveInput(input: XcloudWorkerInput): Promise<XcloudResolvedTest> {
-  if (input.test_id) return resolveFromTestId(input.test_id)
-  return resolveDirect(input)
+async function resolveInput(input: XcloudWorkerInput, requiresXtream: boolean): Promise<XcloudResolvedTest> {
+  if (input.test_id) return resolveFromTestId(input.test_id, requiresXtream)
+  return resolveDirect(input, requiresXtream)
 }
 
 function disabledResult(test: XcloudResolvedTest, logId: string | null, modeStatus: 'disabled' | 'mocked'): XcloudWorkerResult {
@@ -275,11 +275,14 @@ async function withRetries<T>(maxRetries: number, fn: () => Promise<T>): Promise
 
 export async function runXcloudWorker(input: XcloudWorkerInput): Promise<XcloudWorkerResult> {
   const cfg = config()
-  const test = await resolveInput(input)
-  const workerMode = input.mode === 'recreate_device' ? 'recreate_device' : 'normal'
+  const workerMode = input.mode === 'recreate_device' ? 'recreate_device' : input.mode === 'remove_device' ? 'remove_device' : 'normal'
+  const test = await resolveInput(input, workerMode !== 'remove_device')
 
   if (workerMode === 'recreate_device' && input.confirm_recreate !== true) {
     throw new XcloudWorkerError(409, 'XCLOUD_RECREATE_CONFIRMATION_REQUIRED', 'Recriacao da device XCloud exige confirm_recreate=true.', 'FindXcloudDevice')
+  }
+  if (workerMode === 'remove_device' && input.confirm_remove !== true) {
+    throw new XcloudWorkerError(409, 'XCLOUD_REMOVE_CONFIRMATION_REQUIRED', 'Remocao da device XCloud exige confirm_remove=true.', 'FindXcloudDevice')
   }
 
   const startedLogId = await writeLog('XCLOUD_WORKER_STARTED', 'info', {
@@ -295,6 +298,14 @@ export async function runXcloudWorker(input: XcloudWorkerInput): Promise<XcloudW
       test_id: test.test_id,
       message: 'Recriacao controlada de device XCloud solicitada.',
       metadata: { device_key: test.device_key, confirm_recreate: true },
+    })
+  }
+  if (workerMode === 'remove_device') {
+    await writeLog('XCLOUD_REMOVE_REQUESTED', 'warning', {
+      client_id: test.client_id,
+      test_id: test.test_id,
+      message: 'Remocao controlada de device XCloud solicitada.',
+      metadata: { device_key: test.device_key, confirm_remove: true },
     })
   }
 
@@ -314,13 +325,14 @@ export async function runXcloudWorker(input: XcloudWorkerInput): Promise<XcloudW
   }
 
   return runXcloudExclusive(async () => {
-    let currentStage: XcloudWorkerStage = input.retry_stage || (workerMode === 'recreate_device' ? 'FindXcloudDevice' : 'AddXcloudDevice')
+    let currentStage: XcloudWorkerStage = input.retry_stage || (workerMode === 'recreate_device' || workerMode === 'remove_device' ? 'FindXcloudDevice' : 'AddXcloudDevice')
     let deviceAdded = false
     let deviceAlreadyExists = false
     let deviceFound = false
     let deviceDeactivated = false
     let deviceDeleted = false
     let deviceRecreated = false
+    let deviceRemoved = false
     let deviceReady = false
     let deviceReadiness: XcloudDeviceReadiness | undefined
     let xtreamAttached = false
@@ -330,10 +342,10 @@ export async function runXcloudWorker(input: XcloudWorkerInput): Promise<XcloudW
     try {
       const page = await getXcloudPage(cfg)
 
-      if (workerMode === 'recreate_device') {
+      if (workerMode === 'recreate_device' || workerMode === 'remove_device') {
         if (!input.retry_stage || input.retry_stage === 'FindXcloudDevice') {
           currentStage = 'FindXcloudDevice'
-          await updateTestMetadata(test, { status: 'running', stage: currentStage, recreate_device: true })
+          await updateTestMetadata(test, { status: 'running', stage: currentStage, recreate_device: workerMode === 'recreate_device', remove_device: workerMode === 'remove_device' })
           const findResult = await withRetries(cfg.maxRetries, () => findXcloudDevice(page, cfg, test.device_key))
           deviceFound = findResult.device_found
           await writeLog('XCLOUD_DEVICE_FOUND', deviceFound ? 'success' : 'warning', {
@@ -384,6 +396,52 @@ export async function runXcloudWorker(input: XcloudWorkerInput): Promise<XcloudW
             message: 'Device XCloud excluida.',
             metadata: { device_key: test.device_key, device_deleted: deviceDeleted },
           })
+        }
+
+        if (workerMode === 'remove_device') {
+          deviceRemoved = !deviceFound || deviceDeleted
+          currentStage = 'Completed'
+          await updateTestMetadata(test, {
+            status: 'success',
+            stage: 'Completed',
+            mode: workerMode,
+            device_found: deviceFound,
+            device_deactivated: deviceDeactivated,
+            device_deleted: deviceDeleted,
+            device_removed: deviceRemoved,
+            xtream_attached: false,
+            confirmation_found: false,
+            screenshot_path: null,
+            error: null,
+          })
+          await createPipelineEvent(test, 'xcloud_remove_device_completed', {
+            device_key: test.device_key,
+            mode: workerMode,
+            device_found: deviceFound,
+            device_deactivated: deviceDeactivated,
+            device_deleted: deviceDeleted,
+            device_removed: deviceRemoved,
+          }, input.operator_ref)
+          const logId = await writeLog('XCLOUD_REMOVE_CONFIRMED', 'success', {
+            client_id: test.client_id,
+            test_id: test.test_id,
+            message: deviceFound ? 'Device XCloud removida.' : 'Device XCloud nao estava presente; remocao considerada concluida.',
+            metadata: { device_key: test.device_key, device_found: deviceFound, device_deleted: deviceDeleted },
+          })
+          return {
+            status: 'success',
+            stage: 'Completed',
+            device_added: false,
+            device_found: deviceFound,
+            device_deactivated: deviceDeactivated,
+            device_deleted: deviceDeleted,
+            device_removed: deviceRemoved,
+            xtream_attached: false,
+            confirmation_found: false,
+            masked_device_key: maskDeviceKey(test.device_key),
+            log_id: logId,
+            message: 'Device XCloud removida sem recriar.',
+          }
         }
 
         if (!input.retry_stage || input.retry_stage !== 'AttachXtreamCredentials') {
@@ -458,6 +516,7 @@ export async function runXcloudWorker(input: XcloudWorkerInput): Promise<XcloudW
         device_deactivated: deviceDeactivated,
         device_deleted: deviceDeleted,
         device_recreated: deviceRecreated,
+        device_removed: deviceRemoved,
         xtream_attached: xtreamAttached,
         confirmation_found: confirmationFound,
         screenshot_path: null,
@@ -474,6 +533,7 @@ export async function runXcloudWorker(input: XcloudWorkerInput): Promise<XcloudW
         device_deactivated: deviceDeactivated,
         device_deleted: deviceDeleted,
         device_recreated: deviceRecreated,
+        device_removed: deviceRemoved,
         xtream_attached: xtreamAttached,
         confirmation_found: confirmationFound,
       }, input.operator_ref)
@@ -495,6 +555,7 @@ export async function runXcloudWorker(input: XcloudWorkerInput): Promise<XcloudW
         device_deactivated: deviceDeactivated,
         device_deleted: deviceDeleted,
         device_recreated: deviceRecreated,
+        device_removed: deviceRemoved,
         xtream_attached: xtreamAttached,
         confirmation_found: confirmationFound,
         masked_device_key: maskDeviceKey(test.device_key),
@@ -535,12 +596,13 @@ export async function runXcloudWorker(input: XcloudWorkerInput): Promise<XcloudW
         device_deactivated: deviceDeactivated,
         device_deleted: deviceDeleted,
         device_recreated: deviceRecreated,
+        device_removed: deviceRemoved,
         xtream_attached: xtreamAttached,
         confirmation_found: confirmationFound,
         screenshot_path: screenshotPath,
         error: err.message,
       }).catch(() => undefined)
-      const logId = await writeLog(workerMode === 'recreate_device' ? 'XCLOUD_RECREATE_FAILED' : 'XCLOUD_WORKER_FAILED', 'error', {
+      const logId = await writeLog(workerMode === 'recreate_device' ? 'XCLOUD_RECREATE_FAILED' : workerMode === 'remove_device' ? 'XCLOUD_REMOVE_FAILED' : 'XCLOUD_WORKER_FAILED', 'error', {
         client_id: test.client_id,
         test_id: test.test_id,
         message: err.message,
@@ -563,6 +625,7 @@ export async function runXcloudWorker(input: XcloudWorkerInput): Promise<XcloudW
         device_deactivated: deviceDeactivated,
         device_deleted: deviceDeleted,
         device_recreated: deviceRecreated,
+        device_removed: deviceRemoved,
         xtream_attached: xtreamAttached,
         confirmation_found: confirmationFound,
         masked_device_key: maskDeviceKey(test.device_key),

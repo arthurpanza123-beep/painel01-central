@@ -8,7 +8,7 @@ export type XcloudWorkerStage =
   | 'AttachXtreamCredentials'
   | 'Completed'
 
-export type XcloudWorkerMode = 'normal' | 'recreate_device'
+export type XcloudWorkerMode = 'normal' | 'recreate_device' | 'remove_device'
 
 export type XcloudDeviceReadiness = {
   row_found: boolean
@@ -29,6 +29,7 @@ export type XcloudWorkerInput = {
   password?: string
   mode?: XcloudWorkerMode
   confirm_recreate?: boolean
+  confirm_remove?: boolean
   retry_stage?: Exclude<XcloudWorkerStage, 'GenerateAccess' | 'Completed'>
   operator_ref?: string
 }
@@ -60,6 +61,7 @@ export type XcloudWorkerResult = {
   device_deactivated?: boolean
   device_deleted?: boolean
   device_recreated?: boolean
+  device_removed?: boolean
   xtream_attached: boolean
   confirmation_found: boolean
   masked_device_key: string

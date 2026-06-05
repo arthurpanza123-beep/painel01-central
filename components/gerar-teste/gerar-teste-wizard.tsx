@@ -26,6 +26,7 @@ interface FormData {
 
 interface TesteGerado {
   id: string
+  clientId?: string
   pedido: string
   host: string
   codigo: string
@@ -386,6 +387,7 @@ export function GerarTesteWizard() {
 
         return {
           id:       data.test.id,
+          clientId: data.test.client_id || data.client?.id || undefined,
           pedido:   data.test.pedido || data.test.order_id || '',
           host:     data.test.host || data.test.dns || '',
           codigo:   data.test.provider_code || data.test.code || '',
@@ -470,16 +472,23 @@ export function GerarTesteWizard() {
     const params = new URLSearchParams({
       source: 'painel1',
       test_id: teste.id,
+      ...(teste.clientId ? { client_id: teste.clientId } : {}),
       client_name: form.nome,
       client_phone: form.telefone,
       app: form.app,
-      servidor: form.servidor,
+      panel: form.servidor,
       flow: 'test_created',
     })
     if (form.app === 'xcloud' && form.deviceKey) {
       params.set('device_key', form.deviceKey)
     }
     window.open(`https://painel2.centralplayplus.com.br?${params.toString()}`, '_blank')
+  }
+
+  const handleConcluir = () => {
+    handleAbrirPainel2()
+    addToast('success', 'Contexto enviado para o Painel 2')
+    handleNovoTeste()
   }
 
   const handleAtivarCliente = () => {
@@ -642,6 +651,7 @@ export function GerarTesteWizard() {
                 teste={teste}
                 copied={copied}
                 onCopiar={handleCopiar}
+                onConcluir={handleConcluir}
                 onAbrirPainel2={handleAbrirPainel2}
                 onAtivarCliente={handleAtivarCliente}
                 onVerLog={handleVerLog}
@@ -1129,6 +1139,7 @@ function TelaGerando({
 }) {
   const servidorSelecionado = SERVIDORES.find((s) => s.id === form.servidor)
   const appSelecionado = APPS.find(a => a.id === form.app)
+  const isXCloud = form.app === 'xcloud'
 
   return (
     <div className="w-full max-w-md">
@@ -1141,18 +1152,18 @@ function TelaGerando({
           <div
             className="absolute inset-0 rounded-full"
             style={{
-              background: 'radial-gradient(circle, rgba(37,99,235,0.15) 0%, transparent 70%)',
-              boxShadow: '0 0 60px rgba(37,99,235,0.3)',
+              background: isXCloud ? 'radial-gradient(circle, rgba(20,184,166,0.2) 0%, transparent 70%)' : 'radial-gradient(circle, rgba(37,99,235,0.15) 0%, transparent 70%)',
+              boxShadow: isXCloud ? '0 0 60px rgba(20,184,166,0.4)' : '0 0 60px rgba(37,99,235,0.3)',
               animation: 'linePulse 2s ease-in-out infinite',
             }}
           />
           <div
             className="absolute h-28 w-28 rounded-full border-[3px] animate-spin"
             style={{
-              borderColor: 'rgba(59,130,246,0.1)',
-              borderTopColor: '#3b82f6',
-              borderRightColor: 'rgba(59,130,246,0.4)',
-              boxShadow: '0 0 30px rgba(59,130,246,0.5)',
+              borderColor: isXCloud ? 'rgba(20,184,166,0.1)' : 'rgba(59,130,246,0.1)',
+              borderTopColor: isXCloud ? '#14b8a6' : '#3b82f6',
+              borderRightColor: isXCloud ? 'rgba(20,184,166,0.4)' : 'rgba(59,130,246,0.4)',
+              boxShadow: isXCloud ? '0 0 30px rgba(20,184,166,0.5)' : '0 0 30px rgba(59,130,246,0.5)',
               animationDuration: '1.2s',
             }}
           />
@@ -1165,8 +1176,15 @@ function TelaGerando({
               animationDirection: 'reverse',
             }}
           />
-          <Server style={{ width: 32, height: 32, color: '#3b82f6' }} />
+          <Server style={{ width: 32, height: 32, color: isXCloud ? '#14b8a6' : '#3b82f6' }} />
         </div>
+
+        {isXCloud && (
+          <div className="mb-4 inline-flex items-center gap-2 rounded-full px-4 py-2" style={{ background: 'rgba(20,184,166,0.15)', border: '1px solid rgba(20,184,166,0.3)' }}>
+            <span className="h-2 w-2 rounded-full animate-pulse" style={{ background: '#14b8a6' }} />
+            <span className="text-sm font-semibold" style={{ color: '#5eead4' }}>XCloud preparado para ativacao real por botao</span>
+          </div>
+        )}
 
         <h2 className="mb-2 text-2xl font-bold text-white" style={{ fontFamily: 'var(--font-display)' }}>
           Gerando teste para
@@ -1259,6 +1277,7 @@ function TelaSucesso({
   teste,
   copied,
   onCopiar,
+  onConcluir,
   onAbrirPainel2,
   onAtivarCliente,
   onVerLog,
@@ -1276,6 +1295,7 @@ function TelaSucesso({
   teste: TesteGerado
   copied: boolean
   onCopiar: () => void
+  onConcluir: () => void
   onAbrirPainel2: () => void
   onAtivarCliente: () => void
   onVerLog: () => void
@@ -1520,11 +1540,23 @@ function TelaSucesso({
               {copied ? 'Copiado!' : 'Copiar dados'}
             </button>
             <button
-              onClick={onAbrirPainel2}
+              onClick={onConcluir}
               className="flex h-12 items-center justify-center gap-2 rounded-xl text-sm font-bold text-white transition-all"
               style={{
-                background: 'linear-gradient(135deg, #2563eb, #1d4ed8)',
-                boxShadow: '0 4px 20px rgba(37,99,235,0.35)',
+                background: 'linear-gradient(135deg, #22c55e, #16a34a)',
+                boxShadow: '0 4px 20px rgba(34,197,94,0.35)',
+              }}
+            >
+              <CheckCircle className="h-[18px] w-[18px]" />
+              Concluir
+            </button>
+            <button
+              onClick={onAbrirPainel2}
+              className="flex h-12 items-center justify-center gap-2 rounded-xl text-sm font-medium transition-all"
+              style={{
+                background: 'rgba(37,99,235,0.12)',
+                border: '1px solid rgba(37,99,235,0.24)',
+                color: '#93c5fd',
               }}
             >
               <ExternalLink className="h-[18px] w-[18px]" />

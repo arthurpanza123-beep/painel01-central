@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import {
   Users, Search, Phone, Package, Server, Calendar, DollarSign,
-  RefreshCw, UserCheck, Repeat, Eye, Copy, Bug,
+  RefreshCw, Eye, Key, Tv2, Sparkles,
 } from 'lucide-react'
 import {
   MOCK_CLIENTES,
@@ -140,18 +140,23 @@ export function ClientesPage() {
   }
 
   const buildActions = (c: Cliente): ActionItem[] => [
-    { label: 'Renovar', icon: RefreshCw, onClick: () => addToast('success', `Renovacao de ${c.nome} iniciada`), color: '#60a5fa' },
-    { label: 'Ativar cliente', icon: UserCheck, onClick: () => addToast('success', `${c.nome} ativado`) },
-    { label: 'Trocar aplicativo', icon: Repeat, onClick: () => addToast('info', 'Selecione o novo app') },
-    { label: 'Trocar servidor', icon: Server, onClick: () => addToast('info', 'Selecione o novo servidor') },
-    { label: 'Registrar problema', icon: Bug, onClick: () => addToast('info', 'Abrindo suporte tecnico'), color: '#a78bfa' },
+    { label: 'Renovar', icon: RefreshCw, onClick: () => {
+      const params = new URLSearchParams({ source: 'painel1', flow: 'renewal_created', client_id: c.id, client_name: c.nome, app: c.app, plan: c.plano, amount: String(c.valor), dueAt: c.vencimento })
+      window.open(`https://painel2.centralplayplus.com.br?${params.toString()}`, '_blank')
+      addToast('success', `Renovacao de ${c.nome} preparada no Painel 2`)
+    }, color: '#60a5fa' },
+    { label: 'Playlist / Credenciais', icon: Key, onClick: () => setSelecionado(c), color: '#14b8a6' },
+    { label: 'Ativar segunda tela', icon: Tv2, onClick: () => {
+      if (c.usuario) navigator.clipboard.writeText(c.usuario)
+      const params = new URLSearchParams({ source: 'painel1', flow: 'second_screen', client_id: c.id, client_name: c.nome, app: c.app, panel: c.servidor })
+      window.open(`https://painel2.centralplayplus.com.br?${params.toString()}`, '_blank')
+      addToast('info', 'Usuario copiado e contexto enviado para Painel 2')
+    }, color: '#f59e0b' },
+    { label: 'Codex IA', icon: Sparkles, onClick: () => {
+      navigator.clipboard.writeText(`Cliente: ${c.nome}\nTelefone: ${c.telefone}\nApp: ${c.app}\nServidor: ${c.servidor}\nPlano: ${c.plano}\nVencimento: ${c.vencimento}\n\nProblema/Pergunta:`)
+      addToast('success', 'Contexto copiado para Codex IA')
+    }, color: '#a78bfa' },
     { label: 'Ver dados', icon: Eye, onClick: () => setSelecionado(c) },
-    {
-      label: 'Copiar mensagem', icon: Copy, onClick: () => {
-        navigator.clipboard.writeText(`Ola ${c.nome}! Seu acesso ${c.app} (${c.servidor}) vence em ${c.vencimento}.`)
-        addToast('success', 'Mensagem copiada')
-      },
-    },
   ]
 
   return (

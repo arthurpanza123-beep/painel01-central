@@ -14,7 +14,8 @@ import {
   Terminal,
   LogOut,
   Kanban,
-  LayoutDashboard
+  LayoutDashboard,
+  Zap
 } from 'lucide-react'
 
 const NAV_ITEMS: { id: NavPage; label: string; Icon: React.FC<{ className?: string }> }[] = [
@@ -22,6 +23,7 @@ const NAV_ITEMS: { id: NavPage; label: string; Icon: React.FC<{ className?: stri
   { id: 'pipeline',     label: 'Pipeline',     Icon: ({ className }) => <Kanban className={className} /> },
   { id: 'gerar-teste',  label: 'Gerar Teste',  Icon: ({ className }) => <Headphones className={className} /> },
   { id: 'testes',       label: 'Testes',       Icon: ({ className }) => <TestTube2 className={className} /> },
+  { id: 'ativar-clientes', label: 'Ativar Clientes', Icon: ({ className }) => <Zap className={className} /> },
   { id: 'clientes',     label: 'Clientes',     Icon: ({ className }) => <Users className={className} /> },
   { id: 'contas',       label: 'Contas',       Icon: ({ className }) => <Wallet className={className} /> },
   { id: 'renovacoes',   label: 'Renovacoes',   Icon: ({ className }) => <RefreshCw className={className} /> },
