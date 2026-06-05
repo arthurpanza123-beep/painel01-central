@@ -14,6 +14,7 @@ import {
 } from '@/lib/mock-data'
 import { AccountGroupCard } from '@/components/shared/account-group-card'
 import { useToast } from '@/components/ui/toast'
+import { buildProviderCredentials, getProviderPanelUrl, listCompatibleApps } from '@/lib/config/provider-catalog'
 
 type VagaTarget = { conta: Conta; index: number }
 type ActivationRecommendation = {
@@ -241,8 +242,32 @@ function AtivarModal({
 // ——— Modal: Credenciais ———
 function CredenciaisModal({ conta, onClose }: { conta: Conta; onClose: () => void }) {
   const { addToast } = useToast()
+  const providerPanelUrl = getProviderPanelUrl(conta.servidor)
+  const compatibleApps = listCompatibleApps(conta.servidor).slice(0, 8)
+  const selectedCredential = (() => {
+    try {
+      return buildProviderCredentials({
+        provider: conta.servidor,
+        app: conta.app,
+        username: conta.usuario,
+        password: conta.senha,
+      })
+    } catch {
+      return null
+    }
+  })()
   const handleCopy = () => {
-    const txt = `Conta: ${conta.codigo}\nUsuario: ${conta.usuario}\nSenha: ${conta.senha}\nApp: ${conta.app}\nServidor: ${conta.servidor}\nValidade: ${conta.vencimento}`
+    const txt = [
+      `Conta: ${conta.codigo}`,
+      `App: ${conta.app}`,
+      selectedCredential?.providerCode ? `Provider: ${selectedCredential.providerCode}` : null,
+      selectedCredential?.code ? `Codigo: ${selectedCredential.code}` : null,
+      selectedCredential?.dns ? `DNS: ${selectedCredential.dns}` : null,
+      `Usuario: ${conta.usuario}`,
+      `Senha: ${conta.senha}`,
+      `Servidor: ${conta.servidor}`,
+      `Validade: ${conta.vencimento}`,
+    ].filter(Boolean).join('\n')
     navigator.clipboard.writeText(txt)
     addToast('success', 'Credenciais copiadas')
   }
@@ -261,18 +286,38 @@ function CredenciaisModal({ conta, onClose }: { conta: Conta; onClose: () => voi
           { label: 'Usuario', value: conta.usuario },
           { label: 'Senha', value: conta.senha },
           { label: 'Servidor', value: conta.servidor },
+          selectedCredential?.providerCode ? { label: 'Provider', value: selectedCredential.providerCode } : null,
+          selectedCredential?.code ? { label: 'Codigo', value: selectedCredential.code } : null,
+          selectedCredential?.dns ? { label: 'DNS', value: selectedCredential.dns } : null,
           { label: 'Validade', value: conta.vencimento },
-        ].map(({ label, value }) => (
+        ].filter((item): item is { label: string; value: string } => Boolean(item)).map(({ label, value }) => (
           <div key={label} className="flex items-center justify-between py-2" style={{ borderBottom: '1px solid var(--border)' }}>
             <span className="text-xs text-slate-500">{label}</span>
             <span className="text-sm text-white font-mono">{value}</span>
           </div>
         ))}
+        {compatibleApps.length > 0 && (
+          <div className="pt-2">
+            <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-2">Apps compativeis</p>
+            <div className="flex flex-wrap gap-2">
+              {compatibleApps.map((app) => (
+                <span key={app.key} className="rounded-lg px-2 py-1 text-[11px]" style={{ background: app.recommended ? 'rgba(34,197,94,0.1)' : 'rgba(255,255,255,0.04)', color: app.recommended ? '#4ade80' : '#94a3b8', border: '1px solid var(--border)' }}>
+                  {app.name}{app.providerCode ? ` · ${app.providerCode}` : app.code ? ` · ${app.code}` : app.dns ? ` · ${app.dns}` : ''}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
       <div className="p-5 flex gap-2" style={{ borderTop: '1px solid var(--border)' }}>
         <button onClick={handleCopy} className="flex-1 h-10 rounded-xl text-sm font-medium flex items-center justify-center gap-2" style={{ background: 'rgba(59,130,246,0.12)', border: '1px solid rgba(59,130,246,0.25)', color: '#60a5fa' }}>
           <Copy className="h-4 w-4" /> Copiar
         </button>
+        {providerPanelUrl && (
+          <button onClick={() => window.open(providerPanelUrl, '_blank')} className="h-10 px-3 rounded-xl text-sm font-medium flex items-center justify-center" style={{ background: 'rgba(20,184,166,0.12)', border: '1px solid rgba(20,184,166,0.25)', color: '#2dd4bf' }}>
+            Painel
+          </button>
+        )}
         <button onClick={onClose} className="h-10 px-4 rounded-xl text-sm font-medium flex items-center justify-center" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', color: '#94a3b8' }}>
           <X className="h-4 w-4" />
         </button>

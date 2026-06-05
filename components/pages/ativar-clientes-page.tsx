@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { CheckCircle, ChevronRight, Search, UserPlus, Users, Zap } from 'lucide-react'
 
 import { useToast } from '@/components/ui/toast'
+import { getProviderPanelUrl, listCompatibleApps } from '@/lib/config/provider-catalog'
 import type { Cliente } from '@/lib/mock-data'
 
 type Step = 'busca' | 'app_plano' | 'confirmar'
@@ -26,14 +27,29 @@ const APPS = [
   { id: 'blessed', label: 'Blessed Player', color: '#ef4444' },
   { id: 'playsim', label: 'PlaySim', color: '#f97316' },
   { id: 'funplay', label: 'FunPlay', color: '#8b5cf6' },
+  { id: 'magic_player', label: 'Magic Player', color: '#a855f7' },
+  { id: 'xciptv', label: 'XCIPTV', color: '#06b6d4' },
+  { id: 'smarters', label: 'Smarters', color: '#38bdf8' },
   { id: 'smart_stb', label: 'Smart STB', color: '#3b82f6' },
 ]
 
 const PAINEIS = [
   { id: 'yellow', label: 'Yellow Box' },
+  { id: 'yellow_x3', label: 'Yellow X3' },
   { id: 'ninety', label: 'Ninety' },
   { id: 'cinemax', label: 'CineMax' },
+  { id: 'xbr', label: 'XBR / DevXTop' },
+  { id: 'areaplay', label: 'AreaPlay / Sigma' },
 ]
+
+const PANEL_PROVIDER_LOOKUP: Record<string, string> = {
+  yellow: 'Yellow Box',
+  yellow_x3: 'Yellow Box X3 / Antigo',
+  ninety: 'Ninety',
+  cinemax: 'CineMax',
+  xbr: 'XBR / DevXTop',
+  areaplay: 'AreaPlay / Sigma',
+}
 
 const PLANOS = [
   { id: 'mensal', label: 'Mensal', valor: 20 },
@@ -86,6 +102,9 @@ export function AtivarClientesPage() {
   const valorFinal = clienteSelecionado && clienteSelecionado.valor > 0 ? clienteSelecionado.valor : plano.valor
   const selectedClientName = clienteSelecionado?.nome || novoCliente.name || search
   const selectedClientPhone = clienteSelecionado?.telefone || novoCliente.phone
+  const providerLookup = PANEL_PROVIDER_LOOKUP[panelKey] || panelKey
+  const providerPanelUrl = getProviderPanelUrl(providerLookup)
+  const compatibleApps = listCompatibleApps(providerLookup).slice(0, 8)
 
   async function carregarRecomendacao(nextApp = appKey, nextPanel = panelKey) {
     setRecommendation(null)
@@ -239,6 +258,22 @@ export function AtivarClientesPage() {
               </Panel>
               <Picker title="Aplicativo" items={APPS} value={appKey} onChange={(value) => { setAppKey(value); carregarRecomendacao(value, panelKey) }} />
               <Picker title="Painel gerador" items={PAINEIS.map(p => ({ ...p, color: '#60a5fa' }))} value={panelKey} onChange={(value) => { setPanelKey(value); carregarRecomendacao(appKey, value) }} />
+              <Panel title="Catalogo do painel">
+                <div className="space-y-3">
+                  <div className="flex flex-wrap gap-2">
+                    {compatibleApps.length ? compatibleApps.map((app) => (
+                      <span key={app.key} className="rounded-lg px-2 py-1 text-[11px]" style={{ background: app.recommended ? 'rgba(34,197,94,0.1)' : 'rgba(255,255,255,0.04)', color: app.recommended ? '#4ade80' : '#94a3b8', border: '1px solid var(--border)' }}>
+                        {app.name}{app.providerCode ? ` · Provider ${app.providerCode}` : app.code ? ` · Codigo ${app.code}` : app.dns ? ` · DNS ${app.dns}` : ''}
+                      </span>
+                    )) : <p className="text-xs text-slate-500">Nenhum app catalogado para este painel.</p>}
+                  </div>
+                  {providerPanelUrl && (
+                    <button onClick={() => window.open(providerPanelUrl, '_blank')} className="h-9 px-3 rounded-xl text-xs font-medium" style={{ background: 'rgba(59,130,246,0.12)', border: '1px solid rgba(59,130,246,0.25)', color: '#60a5fa' }}>
+                      Abrir painel do provedor
+                    </button>
+                  )}
+                </div>
+              </Panel>
               <Picker title="Plano" items={PLANOS.map(p => ({ id: p.id, label: `${p.label} · R$ ${p.valor}`, color: '#22c55e' }))} value={planKey} onChange={setPlanKey} />
               {clienteSelecionado && clienteSelecionado.valor > 0 && clienteSelecionado.valor !== plano.valor && (
                 <div className="rounded-xl p-3 text-xs text-amber-200" style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)' }}>
@@ -258,6 +293,12 @@ export function AtivarClientesPage() {
                   <Row label="Painel" value={PAINEIS.find(item => item.id === panelKey)?.label || panelKey} />
                   <Row label="Plano" value={plano.label} />
                   <Row label="Valor" value={`R$ ${valorFinal}`} />
+                </div>
+              </Panel>
+              <Panel title="Catalogo aplicado">
+                <div className="space-y-2">
+                  <p className="text-xs text-slate-500">Apps compativeis serao montados pelo catalogo do provedor, sem codigo generico.</p>
+                  {providerPanelUrl && <Row label="Painel do provedor" value={providerPanelUrl} />}
                 </div>
               </Panel>
               <Panel title="Recomendacao de vaga">
@@ -292,6 +333,9 @@ function appIdFromName(value: string) {
 
 function panelIdFromName(value: string) {
   const normalized = value.toLowerCase()
+  if (normalized.includes('x3')) return 'yellow_x3'
+  if (normalized.includes('area') || normalized.includes('sigma')) return 'areaplay'
+  if (normalized.includes('devx') || normalized.includes('xbr')) return 'xbr'
   return PAINEIS.find((panel) => normalized.includes(panel.id) || normalized.includes(panel.label.toLowerCase()))?.id
 }
 

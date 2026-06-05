@@ -12,15 +12,9 @@ import {
   type StatusTeste
 } from '@/lib/mock-data'
 import { useToast } from '@/components/ui/toast'
+import { getProviderPanelUrl } from '@/lib/config/provider-catalog'
 
 const JANELA_TESTE_MS = 75 * 60 * 1000
-
-const PAINEIS_URL: Record<string, string> = {
-  yellow: 'https://yellowbox.com/painel',
-  yellowbox: 'https://yellowbox.com/painel',
-  ninety: 'https://ninety.com/admin',
-  cinemax: 'https://cinemax.com/painel',
-}
 
 // ——— Countdown hook ———
 function useCountdown(validade: string) {
@@ -296,7 +290,7 @@ export function TestesPage() {
         await navigator.clipboard.writeText(username)
         addToast('success', 'Usuario copiado para a area de transferencia')
       }
-      window.open(data.provider_url || PAINEIS_URL[painelKey(teste.servidor)] || PAINEIS_URL.yellow, '_blank')
+      window.open(data.provider_url || getProviderPanelUrl(teste.servidor) || getProviderPanelUrl(painelKey(teste.servidor)) || 'https://pedidospec.online/#/customers', '_blank')
       window.open(data.painel2_url || `https://painel2.centralplayplus.com.br?source=painel1&flow=test_expired&test_id=${teste.id}`, '_blank')
       setTestes(prev => prev.map(item => item.id === teste.id ? { ...item, status: 'expirado' as StatusTeste } : item))
       setModalExpirar(null)

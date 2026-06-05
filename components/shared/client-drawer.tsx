@@ -1,14 +1,47 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-  X, RefreshCw, Copy, Eye, EyeOff,
+  X, RefreshCw, Copy, Eye, EyeOff, ExternalLink, Loader2,
   User, Phone, Package, Server, Calendar, KeyRound, AlertTriangle, History,
 } from 'lucide-react'
 import type { Cliente } from '@/lib/mock-data'
 import { StatusBadge } from './status-badge'
 import { useToast } from '@/components/ui/toast'
+
+type CatalogAppCredential = {
+  app: string
+  appKey: string
+  providerCode?: string
+  code?: string
+  username?: string
+  password?: string
+  host?: string
+  dns?: string
+  m3uUrl?: string
+  hlsUrl?: string
+  link?: string
+  downloader?: string
+  installHint?: string
+  credentialText: string
+}
+
+type ClientCredentialsPayload = {
+  success: boolean
+  provider: { key: string; name: string; panelUrl: string } | null
+  account: {
+    username?: string
+    password?: string
+    host?: string
+    m3u?: string
+    hls?: string
+    hasSlot?: boolean
+  } | null
+  apps: CatalogAppCredential[]
+  warnings?: string[]
+  error?: string
+}
 
 function Field({ icon: Icon, label, value }: { icon: typeof User; label: string; value: string }) {
   return (
@@ -35,6 +68,58 @@ export function ClientDrawer({
 }) {
   const { addToast } = useToast()
   const [showSenha, setShowSenha] = useState(false)
+  const [details, setDetails] = useState<ClientCredentialsPayload | null>(null)
+  const [loadingDetails, setLoadingDetails] = useState(false)
+  const [detailsError, setDetailsError] = useState('')
+
+  useEffect(() => {
+    let alive = true
+    setDetails(null)
+    setDetailsError('')
+    if (!cliente?.id) return
+    setLoadingDetails(true)
+    fetch(`/api/clients/${cliente.id}/credentials`, { cache: 'no-store' })
+      .then(async (res) => {
+        const payload = await res.json().catch(() => null) as ClientCredentialsPayload | null
+        if (!res.ok || !payload?.success) throw new Error(payload?.error || `HTTP ${res.status}`)
+        if (alive) setDetails(payload)
+      })
+      .catch((err) => {
+        if (alive) setDetailsError(err instanceof Error ? err.message : 'Falha ao carregar credenciais')
+      })
+      .finally(() => {
+        if (alive) setLoadingDetails(false)
+      })
+    return () => { alive = false }
+  }, [cliente?.id])
+
+  function copyValue(label: string, value?: string | null) {
+    const text = String(value || '').trim()
+    if (!text) {
+      addToast('error', `${label} indisponivel`)
+      return
+    }
+    navigator.clipboard.writeText(text)
+    addToast('success', `${label} copiado`)
+  }
+
+  function readyMessage(app?: CatalogAppCredential) {
+    const account = details?.account
+    const providerLine = app?.providerCode ? `Provider: ${app.providerCode}` : app?.code ? `Codigo: ${app.code}` : app?.dns ? `DNS: ${app.dns}` : null
+    return [
+      'Dados de acesso:',
+      '',
+      app ? `App: ${app.app}` : cliente ? `App: ${cliente.app}` : null,
+      providerLine,
+      account?.username ? `Usuario: ${account.username}` : null,
+      account?.password ? `Senha: ${account.password}` : null,
+      account?.host ? `Host: ${account.host}` : null,
+    ].filter(Boolean).join('\n')
+  }
+
+  const username = details?.account?.username || cliente?.usuario || ''
+  const password = details?.account?.password || cliente?.senha || ''
+  const appPreview = details?.apps.slice(0, 8) || []
 
   return (
     <AnimatePresence>
@@ -98,14 +183,36 @@ export function ClientDrawer({
               <div>
                 <p className="text-[10px] text-slate-600 uppercase tracking-widest mb-3">Credenciais</p>
                 <div className="rounded-xl p-4 space-y-3" style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border)' }}>
+                  {loadingDetails && (
+                    <div className="flex items-center gap-2 text-xs text-slate-500">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" /> Carregando catalogo operacional...
+                    </div>
+                  )}
+                  {detailsError && <p className="text-xs text-amber-300">{detailsError}</p>}
+                  {details?.provider && (
+                    <div className="flex items-center justify-between gap-3 rounded-lg p-3" style={{ background: 'rgba(255,255,255,0.03)' }}>
+                      <div className="min-w-0">
+                        <p className="text-[10px] uppercase tracking-wider text-slate-500">Painel do provedor</p>
+                        <p className="text-sm font-semibold text-white truncate">{details.provider.name}</p>
+                      </div>
+                      <button onClick={() => window.open(details.provider?.panelUrl, '_blank')} className="h-8 px-3 rounded-lg text-xs font-medium flex items-center gap-2" style={{ background: 'rgba(59,130,246,0.12)', color: '#60a5fa', border: '1px solid rgba(59,130,246,0.25)' }}>
+                        <ExternalLink className="h-3 w-3" /> Abrir
+                      </button>
+                    </div>
+                  )}
+                  {details?.warnings?.map((warning) => (
+                    <div key={warning} className="flex items-center gap-2 rounded-lg p-2 text-xs text-amber-200" style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.18)' }}>
+                      <AlertTriangle className="h-3.5 w-3.5" /> {warning}
+                    </div>
+                  ))}
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2 min-w-0">
                       <KeyRound className="h-3.5 w-3.5 text-slate-500 shrink-0" />
                       <span className="text-xs text-slate-400">Usuario</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="text-xs text-slate-200 font-mono">{cliente.usuario}</span>
-                      <button onClick={() => { navigator.clipboard.writeText(cliente.usuario); addToast('success', 'Usuario copiado') }} className="text-slate-500 hover:text-white">
+                      <span className="text-xs text-slate-200 font-mono">{username}</span>
+                      <button onClick={() => copyValue('Usuario', username)} className="text-slate-500 hover:text-white">
                         <Copy className="h-3 w-3" />
                       </button>
                     </div>
@@ -116,15 +223,39 @@ export function ClientDrawer({
                       <span className="text-xs text-slate-400">Senha</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="text-xs text-slate-200 font-mono">{showSenha ? cliente.senha : '•'.repeat(cliente.senha.length)}</span>
+                      <span className="text-xs text-slate-200 font-mono">{showSenha ? password : '•'.repeat(password.length || 6)}</span>
                       <button onClick={() => setShowSenha((v) => !v)} className="text-slate-500 hover:text-white">
                         {showSenha ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
                       </button>
-                      <button onClick={() => { navigator.clipboard.writeText(cliente.senha); addToast('success', 'Senha copiada') }} className="text-slate-500 hover:text-white">
+                      <button onClick={() => copyValue('Senha', password)} className="text-slate-500 hover:text-white">
                         <Copy className="h-3 w-3" />
                       </button>
                     </div>
                   </div>
+                  <div className="grid grid-cols-2 gap-2 pt-2">
+                    <button onClick={() => copyValue('M3U', details?.account?.m3u)} className="h-8 rounded-lg text-xs text-slate-300" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)' }}>Copiar M3U</button>
+                    <button onClick={() => copyValue('HLS', details?.account?.hls)} className="h-8 rounded-lg text-xs text-slate-300" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)' }}>Copiar HLS</button>
+                    <button onClick={() => copyValue('Mensagem', readyMessage(appPreview[0]))} className="h-8 rounded-lg text-xs text-slate-300 col-span-2" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)' }}>Copiar mensagem pronta</button>
+                  </div>
+                  {appPreview.length > 0 && (
+                    <div className="pt-2 space-y-2">
+                      <p className="text-[10px] text-slate-500 uppercase tracking-wider">Apps compativeis</p>
+                      {appPreview.map((app) => (
+                        <div key={app.appKey} className="rounded-lg p-3 space-y-2" style={{ background: 'rgba(255,255,255,0.025)', border: '1px solid var(--border)' }}>
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="text-xs font-semibold text-white truncate">{app.app}</p>
+                              <p className="text-[11px] text-slate-500 truncate">{app.providerCode ? `Provider ${app.providerCode}` : app.code ? `Codigo ${app.code}` : app.dns ? `DNS ${app.dns}` : app.downloader ? `Downloader ${app.downloader}` : app.installHint}</p>
+                            </div>
+                            <button onClick={() => copyValue(app.app, app.credentialText)} className="h-7 px-2 rounded-lg text-xs flex items-center gap-1" style={{ background: 'rgba(20,184,166,0.12)', color: '#2dd4bf', border: '1px solid rgba(20,184,166,0.25)' }}>
+                              <Copy className="h-3 w-3" /> App
+                            </button>
+                          </div>
+                          <button onClick={() => copyValue('Mensagem', readyMessage(app))} className="text-[11px] text-slate-400 hover:text-white">Copiar mensagem deste app</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
 

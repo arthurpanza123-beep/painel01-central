@@ -1,24 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 
+import { getProviderPanelUrl } from '@/lib/config/provider-catalog'
 import { maskSensitiveText } from '@/lib/services/masking'
 import { getSupabaseServerClient } from '@/lib/supabase/server'
 
 type JsonRecord = Record<string, unknown>
 
-const PANEL_URLS: Record<string, string> = {
-  yellow: 'https://yellowbox.com/painel',
-  yellowbox: 'https://yellowbox.com/painel',
-  'yellow-box': 'https://yellowbox.com/painel',
-  ninety: 'https://ninety.com/admin',
-  cinemax: 'https://cinemax.com/painel',
-}
-
 function panelUrl(keyOrName: string | null | undefined) {
-  const key = String(keyOrName || '').toLowerCase().replace(/[^a-z0-9]/g, '')
-  if (key.includes('yellow')) return PANEL_URLS.yellow
-  if (key.includes('ninety')) return PANEL_URLS.ninety
-  if (key.includes('cinemax')) return PANEL_URLS.cinemax
-  return PANEL_URLS.yellow
+  return getProviderPanelUrl(String(keyOrName || '')) || getProviderPanelUrl('Yellow Box') || 'https://pedidospec.online/#/customers'
 }
 
 function safeMetadata(metadata: JsonRecord | null | undefined): JsonRecord {
