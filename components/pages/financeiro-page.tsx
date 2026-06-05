@@ -15,6 +15,8 @@ type FinanceData = {
   data_source: 'mock' | 'supabase'
   metrics: {
     receitaMesAtual: number
+    renovacaoMensalPrevista?: number
+    receitaVencimento30d?: number
     receitaPrevista30d: number
     receitaPrevista60d: number
     receitaPrevista90d: number
@@ -26,6 +28,8 @@ type FinanceData = {
     conversaoDia: number
     testesPagos: number
     testesAtivosHoje: number
+    clientesContados?: number
+    clientesForaSoma?: number
   }
   porPlano: { plano: string; valor: number }[]
   creditos: CreditoPainel[]
@@ -43,6 +47,8 @@ function buildFallbackFinance(): FinanceData {
     data_source: 'mock',
     metrics: {
       receitaMesAtual,
+      renovacaoMensalPrevista: receitaMesAtual,
+      receitaVencimento30d: receitaMesAtual,
       receitaPrevista30d: receitaMesAtual,
       receitaPrevista60d: receitaMesAtual * 2,
       receitaPrevista90d: receitaMesAtual * 3,
@@ -54,6 +60,8 @@ function buildFallbackFinance(): FinanceData {
       conversaoDia: 0,
       testesPagos: 0,
       testesAtivosHoje: 0,
+      clientesContados: clientesAtivos.length,
+      clientesForaSoma: 0,
     },
     porPlano: Object.entries(porPlanoMap).map(([plano, valor]) => ({ plano, valor })).sort((a, b) => b.valor - a.valor),
     creditos: MOCK_CREDITOS,
@@ -221,7 +229,7 @@ export function FinanceiroPage() {
       {/* KPIs grandes */}
       <div className="w-full max-w-4xl grid grid-cols-2 lg:grid-cols-4 gap-3 mb-8">
         <BigKPI label="Receita atual" value={`R$ ${fin.receitaMesAtual.toFixed(0)}`} color="#22c55e" sub="+12% este mês" icon={DollarSign} />
-        <BigKPI label="Prevista (30d)" value={`R$ ${fin.receitaPrevista30d.toFixed(0)}`} color="#60a5fa" sub="próximos 30 dias" icon={TrendingUp} />
+        <BigKPI label="Renovação mensal prevista" value={`R$ ${(fin.renovacaoMensalPrevista ?? fin.receitaPrevista30d).toFixed(0)}`} color="#60a5fa" sub={`${fin.clientesContados ?? fin.renovacoesPrevistas} clientes contados`} icon={TrendingUp} />
         <BigKPI label="Lucro estimado" value={`R$ ${fin.lucroEstimado.toFixed(0)}`} color="#a78bfa" icon={Target} />
         <BigKPI label="Ticket médio" value={`R$ ${fin.ticketMedio.toFixed(0)}`} color="#f59e0b" icon={Wallet} />
       </div>
@@ -266,7 +274,7 @@ export function FinanceiroPage() {
               </div>
               <div className="rounded-xl p-3 text-center" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border)' }}>
                 <p className="text-xl font-bold text-white" style={{ fontFamily: 'var(--font-display)' }}>{fin.renovacoesPrevistas}</p>
-                <p className="text-[10px] text-slate-500">renovações previstas</p>
+                <p className="text-[10px] text-slate-500">clientes contados</p>
               </div>
             </div>
           </div>
@@ -278,12 +286,13 @@ export function FinanceiroPage() {
         <div className="rounded-2xl p-6" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
           <div className="flex items-center gap-2 mb-5">
             <TrendingUp className="h-4 w-4" style={{ color: '#60a5fa' }} />
-            <h2 className="text-sm font-semibold text-white">Projeção de receita</h2>
+            <h2 className="text-sm font-semibold text-white">Projeção de renovação</h2>
           </div>
           <div className="space-y-4">
-            <Bar label="30 dias" value={fin.receitaPrevista30d} max={maxProjecao} color="#22c55e" />
+            <Bar label="Mensal" value={fin.receitaPrevista30d} max={maxProjecao} color="#22c55e" />
             <Bar label="60 dias" value={fin.receitaPrevista60d} max={maxProjecao} color="#60a5fa" />
             <Bar label="90 dias" value={fin.receitaPrevista90d} max={maxProjecao} color="#a78bfa" />
+            <Bar label="30d venc." value={fin.receitaVencimento30d ?? fin.receitaPrevista30d} max={maxProjecao} color="#f59e0b" />
           </div>
         </div>
       </div>

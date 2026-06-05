@@ -75,10 +75,43 @@ function getDashboardFromMock(): DashboardMetrics {
 // ─── SUPABASE REAL (read-only) ───────────────────────────────────────────────
 
 type CountResult = { count: number | null; error: { message?: string } | null }
+type ClientFinanceRow = { id: string; name: string | null; status: string | null }
+type RenewalFinanceRow = { client_id: string | null; plan_key: string | null; amount_cents: number | null; created_at: string | null }
 
 function getCount(result: CountResult) {
   if (result.error) throw new Error(result.error.message || 'Falha ao consultar Supabase')
   return result.count || 0
+}
+
+function money(cents?: number | null): number {
+  return Number(((cents || 0) / 100).toFixed(2))
+}
+
+function isTemporaryClient(client: ClientFinanceRow): boolean {
+  return /worker|codex|teste e2e/i.test(String(client.name || ''))
+}
+
+function latestRenewalsByClient(renewals: RenewalFinanceRow[]) {
+  const map = new Map<string, RenewalFinanceRow>()
+  for (const renewal of renewals) {
+    const clientId = renewal.client_id || ''
+    if (!clientId) continue
+    const current = map.get(clientId)
+    if (!current || String(renewal.created_at || '') > String(current.created_at || '')) {
+      map.set(clientId, renewal)
+    }
+  }
+  return map
+}
+
+function calculateMonthlyRenewalForecast(clients: ClientFinanceRow[], renewals: RenewalFinanceRow[]) {
+  const latest = latestRenewalsByClient(renewals)
+  return clients.reduce((total, client) => {
+    if (client.status !== 'active' || isTemporaryClient(client)) return total
+    const renewal = latest.get(client.id)
+    if (String(renewal?.plan_key || '').toLowerCase() !== 'mensal') return total
+    return total + money(renewal?.amount_cents)
+  }, 0)
 }
 
 async function getDashboardFromSupabase(): Promise<DashboardMetrics | null> {
@@ -105,6 +138,8 @@ async function getDashboardFromSupabase(): Promise<DashboardMetrics | null> {
       forecast30Res,
       forecast60Res,
       forecast90Res,
+      financeClientsRes,
+      financeRenewalsRes,
       creditsRes,
     ] = await Promise.all([
       db.from('tests').select('id', { count: 'exact', head: true }),
@@ -119,6 +154,8 @@ async function getDashboardFromSupabase(): Promise<DashboardMetrics | null> {
       db.from('renewals').select('amount_cents').not('amount_cents', 'is', null).gte('due_at', now.toISOString()).lte('due_at', in30d),
       db.from('renewals').select('amount_cents').not('amount_cents', 'is', null).gte('due_at', now.toISOString()).lte('due_at', in60d),
       db.from('renewals').select('amount_cents').not('amount_cents', 'is', null).gte('due_at', now.toISOString()).lte('due_at', in90d),
+      db.from('clients').select('id,name,status'),
+      db.from('renewals').select('client_id,plan_key,amount_cents,created_at'),
       db
         .from('panel_credit_snapshots')
         .select('id, credits_available, estimated_activations, status, checked_at, panels(name)')
@@ -135,12 +172,14 @@ async function getDashboardFromSupabase(): Promise<DashboardMetrics | null> {
     const paidPipeline = getCount(paidPipelineRes)
     const activated = getCount(activatedPipelineRes)
 
-    if (revenueMonthRes.error || forecast30Res.error || forecast60Res.error || forecast90Res.error || creditsRes.error) {
+    if (revenueMonthRes.error || forecast30Res.error || forecast60Res.error || forecast90Res.error || financeClientsRes.error || financeRenewalsRes.error || creditsRes.error) {
       throw new Error(
         revenueMonthRes.error?.message ||
         forecast30Res.error?.message ||
         forecast60Res.error?.message ||
         forecast90Res.error?.message ||
+        financeClientsRes.error?.message ||
+        financeRenewalsRes.error?.message ||
         creditsRes.error?.message ||
         'Falha ao consultar métricas'
       )
@@ -169,6 +208,10 @@ async function getDashboardFromSupabase(): Promise<DashboardMetrics | null> {
       })
 
     const availableCredits = panelCredits.reduce((acc, row) => acc + row.balance, 0)
+    const monthlyRenewalForecast = calculateMonthlyRenewalForecast(
+      (financeClientsRes.data || []) as ClientFinanceRow[],
+      (financeRenewalsRes.data || []) as RenewalFinanceRow[]
+    )
 
     return {
       active_tests: activeTests,
@@ -177,9 +220,11 @@ async function getDashboardFromSupabase(): Promise<DashboardMetrics | null> {
       leads_in_progress: leads + testing + interested,
       available_credits: availableCredits,
       revenue_current_month: sumCents(revenueMonthRes.data),
-      revenue_forecast_30d: sumCents(forecast30Res.data),
-      revenue_forecast_60d: sumCents(forecast60Res.data),
-      revenue_forecast_90d: sumCents(forecast90Res.data),
+      monthly_renewal_forecast: monthlyRenewalForecast,
+      revenue_due_30d: sumCents(forecast30Res.data),
+      revenue_forecast_30d: monthlyRenewalForecast,
+      revenue_forecast_60d: monthlyRenewalForecast * 2,
+      revenue_forecast_90d: monthlyRenewalForecast * 3,
       funnel: [
         { stage: 'novo_lead', label: 'Leads', count: leads, color: '#3b82f6' },
         { stage: 'testando', label: 'Testando', count: testing, color: '#f59e0b' },

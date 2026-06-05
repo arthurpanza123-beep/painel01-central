@@ -55,7 +55,7 @@ export function DashboardPage({ onNavigate, metrics }: DashboardPageProps) {
   const leadsAndamento = dashboardMetrics?.leads_in_progress   ?? MOCK_PIPELINE.filter(l => l.etapa !== 'ativado' && l.etapa !== 'renovacao').length
   const clientesAtivos = dashboardMetrics?.active_clients      ?? MOCK_CLIENTES.filter(c => c.status === 'ativo').length
   const creditos       = dashboardMetrics?.available_credits   ?? fin.creditosDisponiveis
-  const receitaPrevista = dashboardMetrics?.revenue_forecast_30d ?? fin.receitaPrevista30d
+  const receitaPrevista = dashboardMetrics?.monthly_renewal_forecast ?? dashboardMetrics?.revenue_forecast_30d ?? fin.receitaPrevista30d
 
   const serie = [
     { label: 'Hoje', value: dashboardMetrics?.revenue_current_month  ?? fin.receitaMesAtual },
@@ -149,13 +149,13 @@ export function DashboardPage({ onNavigate, metrics }: DashboardPageProps) {
             />
             <div className="relative flex items-start justify-between mb-5">
               <div>
-                <p className="text-xs text-slate-500 mb-1">Receita prevista (30 dias)</p>
+                <p className="text-xs text-slate-500 mb-1">Renovação mensal prevista</p>
                 <p className="text-4xl font-bold text-white" style={{ fontFamily: 'var(--font-display)' }}>
                   R$ {receitaPrevista.toFixed(0)}
                 </p>
                 <p className="text-xs flex items-center gap-1 mt-1.5" style={{ color: '#22c55e' }}>
                   <ArrowUpRight className="h-3.5 w-3.5" />
-                  Projeção crescente nos próximos 90 dias
+                  Base mensal ativa, sem testes temporários
                 </p>
               </div>
               <button

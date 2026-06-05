@@ -5,6 +5,8 @@ export type FinanceQueryResult = {
   data_source: 'mock' | 'supabase'
   metrics: {
     receitaMesAtual: number
+    renovacaoMensalPrevista: number
+    receitaVencimento30d: number
     receitaPrevista30d: number
     receitaPrevista60d: number
     receitaPrevista90d: number
@@ -16,13 +18,15 @@ export type FinanceQueryResult = {
     conversaoDia: number
     testesPagos: number
     testesAtivosHoje: number
+    clientesContados: number
+    clientesForaSoma: number
   }
   porPlano: { plano: string; valor: number }[]
   creditos: CreditoPainel[]
 }
 
-type ClientRow = { id: string; status: string | null }
-type RenewalRow = { plan_key: string | null; amount_cents: number | null; status: string | null; due_at: string | null }
+type ClientRow = { id: string; name?: string | null; status: string | null }
+type RenewalRow = { client_id?: string | null; plan_key: string | null; amount_cents: number | null; status: string | null; due_at: string | null; created_at?: string | null }
 type PaymentRow = { amount_cents: number | null; status: string | null; paid_at: string | null }
 type TestRow = { status: string | null; created_at: string | null }
 type CreditRow = { id: string; panel_id: string; credits_available: number | null; estimated_activations: number | null; cost_per_activation_cents: number | null; status: string | null; checked_at: string | null }
@@ -30,6 +34,51 @@ type PanelRow = { id: string; name: string }
 
 function money(cents?: number | null): number {
   return Number(((cents || 0) / 100).toFixed(2))
+}
+
+function latestRenewalsByClient(renewals: RenewalRow[]): Map<string, RenewalRow> {
+  const map = new Map<string, RenewalRow>()
+  for (const renewal of renewals) {
+    const clientId = renewal.client_id || ''
+    if (!clientId) continue
+    const current = map.get(clientId)
+    if (!current || String(renewal.created_at || '') > String(current.created_at || '')) {
+      map.set(clientId, renewal)
+    }
+  }
+  return map
+}
+
+function isTemporaryClient(client: ClientRow): boolean {
+  return /worker|codex|teste e2e/i.test(String(client.name || ''))
+}
+
+function isMonthlyPlan(planKey?: string | null): boolean {
+  return String(planKey || '').toLowerCase() === 'mensal'
+}
+
+function calculateMonthlyRenewalForecast(clients: ClientRow[], renewals: RenewalRow[]) {
+  const latest = latestRenewalsByClient(renewals)
+  let total = 0
+  let counted = 0
+  let outside = 0
+  const byPlan = new Map<string, number>()
+
+  for (const client of clients) {
+    if (client.status !== 'active' || isTemporaryClient(client)) continue
+    const renewal = latest.get(client.id)
+    const amount = money(renewal?.amount_cents)
+    if (renewal && isMonthlyPlan(renewal.plan_key) && amount > 0) {
+      total += amount
+      counted += 1
+      const plan = renewal.plan_key ? renewal.plan_key.charAt(0).toUpperCase() + renewal.plan_key.slice(1) : 'Mensal'
+      byPlan.set(plan, (byPlan.get(plan) || 0) + amount)
+    } else {
+      outside += 1
+    }
+  }
+
+  return { total, counted, outside, byPlan }
 }
 
 function buildMockResult(): FinanceQueryResult {
@@ -43,20 +92,24 @@ function buildMockResult(): FinanceQueryResult {
 
   return {
     data_source: 'mock',
-    metrics: {
-      receitaMesAtual,
-      receitaPrevista30d: receitaMesAtual,
-      receitaPrevista60d: receitaMesAtual * 2,
-      receitaPrevista90d: receitaMesAtual * 3,
+      metrics: {
+        receitaMesAtual,
+        renovacaoMensalPrevista: receitaMesAtual,
+        receitaVencimento30d: receitaMesAtual,
+        receitaPrevista30d: receitaMesAtual,
+        receitaPrevista60d: receitaMesAtual * 2,
+        receitaPrevista90d: receitaMesAtual * 3,
       lucroEstimado: receitaMesAtual - MOCK_CREDITOS.reduce((acc, c) => acc + c.custoPorAtivacao * 5, 0),
       renovacoesPrevistas: clientesAtivos.length,
       creditosDisponiveis,
       ticketMedio: clientesAtivos.length ? receitaMesAtual / clientesAtivos.length : 0,
       clientesAtivos: clientesAtivos.length,
-      conversaoDia: 0,
-      testesPagos: 0,
-      testesAtivosHoje: 0,
-    },
+        conversaoDia: 0,
+        testesPagos: 0,
+        testesAtivosHoje: 0,
+        clientesContados: clientesAtivos.length,
+        clientesForaSoma: 0,
+      },
     porPlano: Object.entries(porPlanoMap).map(([plano, valor]) => ({ plano, valor })).sort((a, b) => b.valor - a.valor),
     creditos: MOCK_CREDITOS.map((credito) => ({ ...credito })),
   }
@@ -76,8 +129,8 @@ export async function getFinanceData(): Promise<FinanceQueryResult> {
     const in90 = new Date(now.getTime() + 90 * 86400000).toISOString()
 
     const [clientsRes, renewalsRes, paymentsRes, testsRes, creditsRes, panelsRes] = await Promise.all([
-      db.from('clients').select('id,status'),
-      db.from('renewals').select('plan_key,amount_cents,status,due_at').order('due_at', { ascending: true }),
+      db.from('clients').select('id,name,status'),
+      db.from('renewals').select('client_id,plan_key,amount_cents,status,due_at,created_at').order('due_at', { ascending: true }),
       db.from('payments').select('amount_cents,status,paid_at').gte('paid_at', monthStart),
       db.from('tests').select('status,created_at').gte('created_at', todayStart),
       db.from('panel_credit_snapshots').select('id,panel_id,credits_available,estimated_activations,cost_per_activation_cents,status,checked_at').order('checked_at', { ascending: false }),
@@ -116,37 +169,39 @@ export async function getFinanceData(): Promise<FinanceQueryResult> {
 
     const paidPayments = payments.filter((p) => p.status === 'paid')
     const receitaMesAtual = paidPayments.reduce((acc, p) => acc + money(p.amount_cents), 0)
-    const forecast = (until: string) => renewals
-      .filter((r) => r.status !== 'paid' && r.status !== 'cancelled' && r.due_at && r.due_at <= until)
+    const dueForecast = (until: string) => renewals
+      .filter((r) => r.status !== 'paid' && r.status !== 'cancelled' && r.due_at && r.due_at >= now.toISOString() && r.due_at <= until)
       .reduce((acc, r) => acc + money(r.amount_cents), 0)
-    const porPlanoMap = renewals.reduce<Record<string, number>>((acc, r) => {
-      if (!r.amount_cents) return acc
-      const plano = r.plan_key ? r.plan_key.charAt(0).toUpperCase() + r.plan_key.slice(1) : 'Sem plano'
-      acc[plano] = (acc[plano] || 0) + money(r.amount_cents)
-      return acc
-    }, {})
+    const monthlyForecast = calculateMonthlyRenewalForecast(clients, renewals)
+    const porPlanoMap = Object.fromEntries(monthlyForecast.byPlan)
     const clientesAtivos = clients.filter((c) => c.status === 'active').length
     const testesPagos = tests.filter((t) => t.status === 'converted').length
     const testesAtivosHoje = tests.filter((t) => t.status === 'active').length
     const totalTestes = tests.length
     const creditosDisponiveis = creditos.reduce((acc, c) => acc + c.saldo, 0)
     const custoEstimado = creditos.reduce((acc, c) => acc + c.custoPorAtivacao * 5, 0)
+    const renovacaoMensalPrevista = Number(monthlyForecast.total.toFixed(2))
+    const receitaVencimento30d = dueForecast(in30)
 
     return {
       data_source: 'supabase',
       metrics: {
         receitaMesAtual,
-        receitaPrevista30d: forecast(in30),
-        receitaPrevista60d: forecast(in60),
-        receitaPrevista90d: forecast(in90),
-        lucroEstimado: receitaMesAtual - custoEstimado,
-        renovacoesPrevistas: renewals.filter((r) => r.status !== 'paid' && r.status !== 'cancelled').length,
+        renovacaoMensalPrevista,
+        receitaVencimento30d,
+        receitaPrevista30d: renovacaoMensalPrevista,
+        receitaPrevista60d: Number((renovacaoMensalPrevista * 2).toFixed(2)),
+        receitaPrevista90d: Number((renovacaoMensalPrevista * 3).toFixed(2)),
+        lucroEstimado: renovacaoMensalPrevista - custoEstimado,
+        renovacoesPrevistas: monthlyForecast.counted,
         creditosDisponiveis,
-        ticketMedio: clientesAtivos ? receitaMesAtual / clientesAtivos : 0,
+        ticketMedio: monthlyForecast.counted ? renovacaoMensalPrevista / monthlyForecast.counted : 0,
         clientesAtivos,
         conversaoDia: totalTestes ? Math.round((testesPagos / totalTestes) * 100) : 0,
         testesPagos,
         testesAtivosHoje,
+        clientesContados: monthlyForecast.counted,
+        clientesForaSoma: monthlyForecast.outside,
       },
       porPlano: Object.entries(porPlanoMap).map(([plano, valor]) => ({ plano, valor })).sort((a, b) => b.valor - a.valor),
       creditos,
