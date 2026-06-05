@@ -463,7 +463,23 @@ export function GerarTesteWizard() {
   }
 
   const handleAbrirPainel2 = () => {
-    window.open('https://painel2.centralplayplus.com.br', '_blank')
+    if (!teste?.id) {
+      window.open('https://painel2.centralplayplus.com.br', '_blank')
+      return
+    }
+    const params = new URLSearchParams({
+      source: 'painel1',
+      test_id: teste.id,
+      client_name: form.nome,
+      client_phone: form.telefone,
+      app: form.app,
+      servidor: form.servidor,
+      flow: 'test_created',
+    })
+    if (form.app === 'xcloud' && form.deviceKey) {
+      params.set('device_key', form.deviceKey)
+    }
+    window.open(`https://painel2.centralplayplus.com.br?${params.toString()}`, '_blank')
   }
 
   const handleAtivarCliente = () => {
@@ -815,7 +831,7 @@ function StepDados({
         />
         <InputField
           icon={<Phone className="h-[18px] w-[18px]" />}
-          label="Telefone / WhatsApp"
+          label="Telefone"
           placeholder="(22) 99999-9999"
           type="tel"
           value={form.telefone}

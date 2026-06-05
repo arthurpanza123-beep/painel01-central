@@ -7,10 +7,12 @@ import type { Conta } from '@/lib/mock-data'
 // Card de grupo de conta com vagas (ocupacao 1/2, 2/2, vaga disponivel).
 export function AccountGroupCard({
   conta,
+  destacar = false,
   onAtivar,
   onCredenciais,
 }: {
   conta: Conta
+  destacar?: boolean
   onAtivar: (index: number) => void
   onCredenciais: () => void
 }) {
@@ -27,7 +29,11 @@ export function AccountGroupCard({
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       className="rounded-2xl p-5"
-      style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
+      style={{
+        background: destacar ? 'linear-gradient(180deg, rgba(34,197,94,0.08), var(--card))' : 'var(--card)',
+        border: destacar ? '1px solid rgba(34,197,94,0.22)' : '1px solid var(--border)',
+        boxShadow: destacar ? '0 0 0 1px rgba(34,197,94,0.06), 0 12px 36px rgba(34,197,94,0.08)' : undefined,
+      }}
     >
       {/* Cabecalho */}
       <div className="flex items-start justify-between mb-4">
@@ -49,6 +55,11 @@ export function AccountGroupCard({
               >
                 {cheia ? `${ocupadas}/${conta.vagasTotal} Cheia` : `${livres} vaga${livres > 1 ? 's' : ''}`}
               </span>
+              {destacar && !cheia && (
+                <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold text-emerald-300" style={{ background: 'rgba(34,197,94,0.12)' }}>
+                  Livre
+                </span>
+              )}
             </div>
             <p className="text-xs text-slate-500 truncate flex items-center gap-1.5 mt-0.5">
               <Tv2 className="h-3 w-3" /> {conta.app} · {conta.servidor}
