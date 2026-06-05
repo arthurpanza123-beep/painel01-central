@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { AnimatePresence } from 'framer-motion'
 import {
-  MessageCircle, CheckCircle2, CalendarClock, Copy, RefreshCw, Eye, DollarSign,
+  CheckCircle2, CalendarClock, Copy, RefreshCw, Eye, DollarSign,
 } from 'lucide-react'
 import {
   MOCK_RENOVACOES,
@@ -62,12 +62,6 @@ export function RenovacoesPage() {
     vencemEm7Dias: renovacoes.filter((r) => r.diasRestantes > 0 && r.diasRestantes <= 7).length,
   }
 
-  const handleWhatsApp = (r: Renovacao) => {
-    const tel = r.telefone.replace(/\D/g, '')
-    const msg = encodeURIComponent(`Ola ${r.cliente}! Sua renovacao do plano ${r.plano} vence em ${r.vencimento}. Valor: R$ ${r.valor}. Posso enviar o Pix?`)
-    window.open(`https://wa.me/55${tel}?text=${msg}`, '_blank')
-  }
-
   const handleMarcarPago = (id: string, nome: string) => {
     setRenovacoes((prev) => prev.map((r) => (r.id === id ? { ...r, status: 'pago' as StatusRenovacao } : r)))
     addToast('success', `${nome} marcado como pago`)
@@ -82,7 +76,6 @@ export function RenovacoesPage() {
     const pago = r.status === 'pago'
     const items: ActionItem[] = [
       { label: 'Copiar cobranca', icon: Copy, onClick: () => copiarCobranca(r) },
-      { label: 'Abrir WhatsApp', icon: MessageCircle, onClick: () => handleWhatsApp(r), color: '#4ade80' },
       { label: 'Renovar', icon: RefreshCw, onClick: () => addToast('success', `Renovacao de ${r.cliente} iniciada`), color: '#60a5fa' },
     ]
     if (!pago) items.push({ label: 'Marcar pago', icon: CheckCircle2, onClick: () => handleMarcarPago(r.id, r.cliente), color: '#22c55e' })

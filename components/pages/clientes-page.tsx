@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import {
   Users, Search, Phone, Package, Server, Calendar, DollarSign,
-  MessageCircle, RefreshCw, UserCheck, Repeat, Eye, Copy, Bug,
+  RefreshCw, UserCheck, Repeat, Eye, Copy, Bug,
 } from 'lucide-react'
 import {
   MOCK_CLIENTES,
@@ -139,18 +139,12 @@ export function ClientesPage() {
     receita: clientes.filter((c) => c.status === 'ativo').reduce((s, c) => s + c.valor, 0),
   }
 
-  const whats = (c: Cliente) => {
-    window.open(`https://wa.me/55${c.telefone.replace(/\D/g, '')}`, '_blank')
-    addToast('success', 'Abrindo WhatsApp...')
-  }
-
   const buildActions = (c: Cliente): ActionItem[] => [
-    { label: 'Abrir WhatsApp', icon: MessageCircle, onClick: () => whats(c), color: '#4ade80' },
     { label: 'Renovar', icon: RefreshCw, onClick: () => addToast('success', `Renovacao de ${c.nome} iniciada`), color: '#60a5fa' },
     { label: 'Ativar cliente', icon: UserCheck, onClick: () => addToast('success', `${c.nome} ativado`) },
     { label: 'Trocar aplicativo', icon: Repeat, onClick: () => addToast('info', 'Selecione o novo app') },
     { label: 'Trocar servidor', icon: Server, onClick: () => addToast('info', 'Selecione o novo servidor') },
-    { label: 'Debugar problema', icon: Bug, onClick: () => addToast('info', 'Abrindo suporte tecnico'), color: '#a78bfa' },
+    { label: 'Registrar problema', icon: Bug, onClick: () => addToast('info', 'Abrindo suporte tecnico'), color: '#a78bfa' },
     { label: 'Ver dados', icon: Eye, onClick: () => setSelecionado(c) },
     {
       label: 'Copiar mensagem', icon: Copy, onClick: () => {
@@ -246,7 +240,6 @@ export function ClientesPage() {
       <ClientDrawer
         cliente={selecionado}
         onClose={() => setSelecionado(null)}
-        onWhatsApp={whats}
         onRenovar={(c) => addToast('success', `Renovacao de ${c.nome} iniciada`)}
       />
     </>

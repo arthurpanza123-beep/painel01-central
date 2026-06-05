@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-  Kanban, X, MessageCircle, ArrowRight, Phone, Clock,
+  Kanban, X, ArrowRight, Phone, Clock,
   Tv2, Server, DollarSign
 } from 'lucide-react'
 import { MOCK_PIPELINE, type LeadPipeline, type EtapaPipeline } from '@/lib/mock-data'
@@ -217,14 +217,7 @@ function LeadDrawer({
   onClose: () => void
   onAvancar: () => void
 }) {
-  const { addToast } = useToast()
   const isLast = etapa.id === 'renovacao'
-
-  const abrirWhats = () => {
-    const tel = lead.telefone.replace(/\D/g, '')
-    window.open(`https://wa.me/55${tel}`, '_blank')
-    addToast('success', 'Abrindo WhatsApp...')
-  }
 
   return (
     <>
@@ -285,13 +278,6 @@ function LeadDrawer({
                 Avançar etapa <ArrowRight className="h-4 w-4" />
               </button>
             )}
-            <button
-              onClick={abrirWhats}
-              className="w-full h-11 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all"
-              style={{ background: 'rgba(34,197,94,0.12)', border: '1px solid rgba(34,197,94,0.25)', color: '#4ade80' }}
-            >
-              <MessageCircle className="h-4 w-4" /> WhatsApp
-            </button>
           </div>
         </div>
       </motion.div>

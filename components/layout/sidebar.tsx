@@ -28,7 +28,7 @@ const NAV_ITEMS: { id: NavPage; label: string; Icon: React.FC<{ className?: stri
   { id: 'financeiro',   label: 'Financeiro',   Icon: ({ className }) => <DollarSign className={className} /> },
   { id: 'problemas',    label: 'Problemas',    Icon: ({ className }) => <AlertTriangle className={className} /> },
   { id: 'configuracoes',label: 'Configuracoes',Icon: ({ className }) => <Settings className={className} /> },
-  { id: 'debug',        label: 'Debug',        Icon: ({ className }) => <Terminal className={className} /> },
+  { id: 'debug',        label: 'Logs',         Icon: ({ className }) => <Terminal className={className} /> },
 ]
 
 interface SidebarProps {

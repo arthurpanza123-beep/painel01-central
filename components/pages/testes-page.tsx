@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-  MessageCircle, Send, TrendingUp, TestTube2, Search, Radio
+  TrendingUp, TestTube2, Search, Radio
 } from 'lucide-react'
 import {
   MOCK_TESTES,
@@ -12,7 +12,7 @@ import {
 } from '@/lib/mock-data'
 import { useToast } from '@/components/ui/toast'
 
-const JANELA_TESTE_MS = 4 * 60 * 60 * 1000 // janela padrão de teste: 4h
+const JANELA_TESTE_MS = 75 * 60 * 1000 // janela padrão de teste: 1h15
 
 // ——— Countdown hook ———
 function useCountdown(validade: string) {
@@ -64,11 +64,9 @@ const STATUS: Record<StatusTeste, { label: string; color: string }> = {
 
 // ——— Card de teste focado em countdown ———
 function TesteCard({
-  teste, onWhatsApp, onReenviar, onConverter,
+  teste, onConverter,
 }: {
   teste: Teste
-  onWhatsApp: () => void
-  onReenviar: () => void
   onConverter: () => void
 }) {
   const { remaining, urgente, pct } = useCountdown(teste.validade)
@@ -152,20 +150,6 @@ function TesteCard({
           </p>
 
           <div className="flex items-center gap-2 flex-wrap">
-            <button
-              onClick={onReenviar}
-              className="h-7 px-3 rounded-lg text-[11px] font-medium flex items-center gap-1.5 transition-all"
-              style={{ background: 'rgba(96,165,250,0.1)', color: '#60a5fa', border: '1px solid rgba(96,165,250,0.2)' }}
-            >
-              <Send className="h-3 w-3" /> Reenviar
-            </button>
-            <button
-              onClick={onWhatsApp}
-              className="h-7 px-3 rounded-lg text-[11px] font-medium flex items-center gap-1.5 transition-all"
-              style={{ background: 'rgba(34,197,94,0.1)', color: '#4ade80', border: '1px solid rgba(34,197,94,0.2)' }}
-            >
-              <MessageCircle className="h-3 w-3" /> WhatsApp
-            </button>
             {(isAtivo || teste.status === 'sem_resposta') && (
               <button
                 onClick={onConverter}
@@ -230,12 +214,6 @@ export function TestesPage() {
     const ordem: Record<StatusTeste, number> = { ativo: 0, sem_resposta: 1, expirado: 2, pago: 3 }
     return (ordem[a.status] ?? 9) - (ordem[b.status] ?? 9)
   })
-
-  const handleWhatsApp = (t: Teste) => {
-    const tel = t.telefone.replace(/\D/g, '')
-    const msg = encodeURIComponent(`Ola ${t.cliente}! Segue seu acesso:\n\nApp: ${t.app}\nServidor: ${t.servidor}\nUsuario: ${t.usuario}\nSenha: ${t.senha}\nValidade: ${t.validade}`)
-    window.open(`https://wa.me/55${tel}?text=${msg}`, '_blank')
-  }
 
   return (
     <div className="flex-1 flex flex-col items-center px-6 py-10 min-h-screen">
@@ -319,8 +297,6 @@ export function TestesPage() {
               <TesteCard
                 key={teste.id}
                 teste={teste}
-                onWhatsApp={() => handleWhatsApp(teste)}
-                onReenviar={() => { handleWhatsApp(teste); addToast('success', 'Abrindo WhatsApp...') }}
                 onConverter={() => addToast('success', `${teste.cliente} movido para Interessado!`)}
               />
             ))

@@ -107,7 +107,7 @@ export function DebugPage() {
             <Terminal className="h-5 w-5" style={{ color: '#a78bfa' }} />
           </div>
           <div>
-            <h1 className="text-lg font-semibold text-white">Debug</h1>
+            <h1 className="text-lg font-semibold text-white">Logs</h1>
             <p className="text-xs text-slate-500">{metricas.total} logs · {metricas.erros} erros</p>
             <p className="mt-1 inline-flex items-center gap-2 rounded-full px-2.5 py-0.5 text-[10px] font-medium"
                style={{ background: dataSource === 'supabase' ? 'rgba(34,197,94,0.12)' : 'rgba(245,158,11,0.12)', color: dataSource === 'supabase' ? '#4ade80' : '#fbbf24' }}>
