@@ -1,21 +1,31 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Search, Layers, Copy, X, UserPlus, Calendar,
   Server, KeyRound, Check, Plus, MessageCircle, Tv2,
 } from 'lucide-react'
 import {
-  MOCK_CONTAS,
   MOCK_CLIENTES,
-  calcularMetricasContas,
+  MOCK_CONTAS,
   type Conta,
+  type Cliente,
 } from '@/lib/mock-data'
 import { AccountGroupCard } from '@/components/shared/account-group-card'
 import { useToast } from '@/components/ui/toast'
 
 type VagaTarget = { conta: Conta; index: number }
+type ActivationRecommendation = {
+  recommended: boolean
+  reason: string
+  account_id: string | null
+  account_label: string | null
+  slot_id: string | null
+  slot_number: number | null
+  slot_label: string | null
+  requires_new_account: boolean
+}
 
 function ModalShell({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
   return (
@@ -40,21 +50,60 @@ function ModalShell({ children, onClose }: { children: React.ReactNode; onClose:
 // ——— Modal: Ativar cliente que pagou em vaga livre ———
 function AtivarModal({
   target, onClose, onConfirm,
+  candidatos,
 }: {
   target: VagaTarget
   onClose: () => void
-  onConfirm: (nome: string, telefone: string) => void
+  onConfirm: (cliente: Cliente, recommendation: ActivationRecommendation | null) => Promise<void>
+  candidatos: Cliente[]
 }) {
   const { conta } = target
   const { addToast } = useToast()
   const [clienteId, setClienteId] = useState<string>('')
   const [busca, setBusca] = useState('')
+  const [recommendation, setRecommendation] = useState<ActivationRecommendation | null>(null)
+  const [recommendationLoading, setRecommendationLoading] = useState(false)
+  const [recommendationError, setRecommendationError] = useState('')
+  const [submitting, setSubmitting] = useState(false)
 
   // Clientes que pagaram (ativos/pendentes) disponiveis para vincular
-  const candidatos = MOCK_CLIENTES.filter(
+  const listaClientes = candidatos.filter(
     (c) => c.nome.toLowerCase().includes(busca.toLowerCase()) || c.telefone.includes(busca)
   )
-  const selecionado = MOCK_CLIENTES.find((c) => c.id === clienteId)
+  const selecionado = candidatos.find((c) => c.id === clienteId)
+
+  useEffect(() => {
+    let alive = true
+    async function loadRecommendation() {
+      if (!selecionado) {
+        setRecommendation(null)
+        setRecommendationError('')
+        return
+      }
+      setRecommendationLoading(true)
+      setRecommendationError('')
+      try {
+        const params = new URLSearchParams({
+          client_id: selecionado.id,
+          account_id: conta.id,
+          slot_number: String(target.index + 1),
+        })
+        const res = await fetch(`/api/activations/recommendation?${params.toString()}`, { cache: 'no-store' })
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+        if (!alive) return
+        setRecommendation(data)
+      } catch (err) {
+        if (!alive) return
+        setRecommendation(null)
+        setRecommendationError(err instanceof Error ? err.message : 'Falha ao buscar recomendacao')
+      } finally {
+        if (alive) setRecommendationLoading(false)
+      }
+    }
+    loadRecommendation()
+    return () => { alive = false }
+  }, [selecionado, conta.id, target.index])
 
   const gerarMensagem = () => {
     if (!selecionado) return
@@ -89,7 +138,7 @@ function AtivarModal({
             />
           </div>
           <div className="space-y-1.5 max-h-40 overflow-y-auto">
-            {candidatos.map((c) => (
+            {listaClientes.map((c) => (
               <button
                 key={c.id}
                 onClick={() => setClienteId(c.id)}
@@ -127,6 +176,31 @@ function AtivarModal({
           </div>
         </div>
 
+        {selecionado && (
+          <div>
+            <label className="text-[11px] text-slate-500 uppercase tracking-wider mb-2 block">3. Recomendacao de vaga</label>
+            <div className="rounded-lg p-3 text-left" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border)' }}>
+              {recommendationLoading ? (
+                <p className="text-xs text-slate-400">Buscando melhor vaga...</p>
+              ) : recommendationError ? (
+                <p className="text-xs text-red-300">{recommendationError}</p>
+              ) : recommendation ? (
+                <>
+                  <p className="text-xs font-semibold" style={{ color: recommendation.requires_new_account ? '#f59e0b' : '#4ade80' }}>
+                    {recommendation.requires_new_account
+                      ? 'Nenhuma vaga livre. Sera necessario criar nova conta.'
+                      : `Melhor opcao: usar vaga livre na conta ${recommendation.account_label || conta.codigo}`}
+                  </p>
+                  <p className="text-[11px] text-slate-500 mt-1">{recommendation.reason}</p>
+                  {recommendation.slot_label && <p className="text-[11px] text-slate-400 mt-2">Tela recomendada: {recommendation.slot_label}</p>}
+                </>
+              ) : (
+                <p className="text-xs text-slate-500">Selecione um cliente para calcular a vaga.</p>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* 3. Gerar mensagem */}
         {selecionado && (
           <button
@@ -141,12 +215,20 @@ function AtivarModal({
 
       <div className="p-5 flex gap-2" style={{ borderTop: '1px solid var(--border)' }}>
         <button
-          disabled={!selecionado}
-          onClick={() => selecionado && onConfirm(selecionado.nome, selecionado.telefone)}
+          disabled={!selecionado || submitting || recommendationLoading || Boolean(recommendationError) || Boolean(recommendation?.requires_new_account)}
+          onClick={async () => {
+            if (!selecionado) return
+            setSubmitting(true)
+            try {
+              await onConfirm(selecionado, recommendation)
+            } finally {
+              setSubmitting(false)
+            }
+          }}
           className="flex-1 h-10 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all disabled:opacity-40"
           style={{ background: '#22c55e', color: '#06140a' }}
         >
-          <Check className="h-4 w-4" /> Vincular a vaga
+          <Check className="h-4 w-4" /> {submitting ? 'Ativando...' : 'Vincular a vaga'}
         </button>
         <button onClick={onClose} className="h-10 px-4 rounded-xl text-sm font-medium flex items-center justify-center" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', color: '#94a3b8' }}>
           <X className="h-4 w-4" />
@@ -203,10 +285,48 @@ function CredenciaisModal({ conta, onClose }: { conta: Conta; onClose: () => voi
 export function ContasPage() {
   const [search, setSearch] = useState('')
   const [contas, setContas] = useState<Conta[]>(MOCK_CONTAS)
+  const [clientes, setClientes] = useState<Cliente[]>(MOCK_CLIENTES)
+  const [dataSource, setDataSource] = useState<'mock' | 'supabase'>('mock')
   const [credenciais, setCredenciais] = useState<Conta | null>(null)
   const [ativarTarget, setAtivarTarget] = useState<VagaTarget | null>(null)
   const { addToast } = useToast()
-  const metricas = calcularMetricasContas()
+
+  async function carregarDados(alive = true) {
+    try {
+      const [accountsRes, clientsRes] = await Promise.all([
+        fetch('/api/accounts', { cache: 'no-store' }),
+        fetch('/api/clients', { cache: 'no-store' }),
+      ])
+      if (!accountsRes.ok || !clientsRes.ok) throw new Error('Falha ao carregar contas')
+      const accountsPayload = await accountsRes.json()
+      const clientsPayload = await clientsRes.json()
+      if (!alive) return
+      setContas(Array.isArray(accountsPayload.items) ? accountsPayload.items : MOCK_CONTAS)
+      setClientes(Array.isArray(clientsPayload.items) ? clientsPayload.items : MOCK_CLIENTES)
+      setDataSource(accountsPayload.data_source === 'supabase' && clientsPayload.data_source === 'supabase' ? 'supabase' : 'mock')
+    } catch {
+      if (!alive) return
+      setContas(MOCK_CONTAS)
+      setClientes(MOCK_CLIENTES)
+      setDataSource('mock')
+    }
+  }
+
+  useEffect(() => {
+    let alive = true
+    carregarDados(alive)
+    return () => { alive = false }
+  }, [])
+
+  const vagasTotais = contas.reduce((acc, c) => acc + c.vagasTotal, 0)
+  const vagasOcupadas = contas.reduce((acc, c) => acc + c.clientesVinculados.length, 0)
+  const metricas = {
+    totalContas: contas.length,
+    vagasLivres: vagasTotais - vagasOcupadas,
+    vagasTotais,
+    contasComVaga: contas.filter((c) => c.clientesVinculados.length < c.vagasTotal).length,
+    contasCompletas: contas.filter((c) => c.clientesVinculados.length >= c.vagasTotal).length,
+  }
 
   const contasFiltradas = contas.filter((c) => {
     if (!search) return true
@@ -221,16 +341,32 @@ export function ContasPage() {
     )
   })
 
-  const confirmarAtivacao = (nome: string, telefone: string) => {
+  const confirmarAtivacao = async (cliente: Cliente, recommendation: ActivationRecommendation | null) => {
     if (!ativarTarget) return
     const { conta } = ativarTarget
-    setContas((prev) => prev.map((c) =>
-      c.id === conta.id
-        ? { ...c, clientesVinculados: [...c.clientesVinculados, { id: `${Date.now()}`, nome, telefone, criadoEm: new Date().toLocaleDateString('pt-BR') }] }
-        : c
-    ))
-    addToast('success', `${nome} ativado na conta ${conta.codigo}`)
-    setAtivarTarget(null)
+    try {
+      const res = await fetch('/api/activations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          client_id: cliente.id,
+          account_id: recommendation?.account_id || conta.id,
+          slot_id: recommendation?.slot_id || undefined,
+          slot_number: recommendation?.slot_number || ativarTarget.index + 1,
+          plan_key: cliente.plano?.toLowerCase() || 'mensal',
+          amount: cliente.valor || 35,
+          due_at: cliente.vencimento,
+          operator_ref: 'painel_web',
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok || !data.success) throw new Error(data.error || `HTTP ${res.status}`)
+      addToast('success', `${cliente.nome} ativado na ${data.activation.slot_label} da conta ${data.activation.account_label}`)
+      setAtivarTarget(null)
+      await carregarDados()
+    } catch (err) {
+      addToast('error', err instanceof Error ? err.message : 'Falha ao ativar cliente')
+    }
   }
 
   return (
@@ -245,6 +381,10 @@ export function ContasPage() {
           <h1 className="text-2xl font-bold text-white mb-2" style={{ fontFamily: 'var(--font-display)' }}>Contas</h1>
           <p className="text-slate-500 text-sm">
             {metricas.totalContas} contas · {metricas.vagasLivres} vagas livres de {metricas.vagasTotais}
+          </p>
+          <p className="mt-2 inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-medium"
+             style={{ background: dataSource === 'supabase' ? 'rgba(34,197,94,0.12)' : 'rgba(245,158,11,0.12)', color: dataSource === 'supabase' ? '#4ade80' : '#fbbf24' }}>
+            Fonte: {dataSource === 'supabase' ? 'Supabase' : 'Mock'}
           </p>
         </div>
 
@@ -308,7 +448,7 @@ export function ContasPage() {
       <AnimatePresence>
         {credenciais && <CredenciaisModal conta={credenciais} onClose={() => setCredenciais(null)} />}
         {ativarTarget && (
-          <AtivarModal target={ativarTarget} onClose={() => setAtivarTarget(null)} onConfirm={confirmarAtivacao} />
+          <AtivarModal target={ativarTarget} candidatos={clientes} onClose={() => setAtivarTarget(null)} onConfirm={confirmarAtivacao} />
         )}
       </AnimatePresence>
     </>

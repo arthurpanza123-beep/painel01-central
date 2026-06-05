@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import {
   TestTube2, Users, Kanban, Wallet, Zap,
@@ -27,29 +28,46 @@ interface DashboardPageProps {
 }
 
 export function DashboardPage({ onNavigate, metrics }: DashboardPageProps) {
+  const [remoteMetrics, setRemoteMetrics] = useState<DashboardMetrics | undefined>(metrics)
+
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/dashboard')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: DashboardMetrics | null) => {
+        if (!cancelled && data) setRemoteMetrics(data)
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const dashboardMetrics = remoteMetrics ?? metrics
+
   // ── Fallback para mock quando metrics não for fornecido (estado atual) ──
   // MOCK: bloco abaixo é temporário — remover quando metrics vier do Supabase
   const fin  = calcularMetricasFinanceiro()
   const pipe = calcularMetricasPipeline()
 
-  const testesAtivos   = metrics?.active_tests        ?? MOCK_TESTES.filter(t => t.status === 'ativo').length
-  const testesHoje     = metrics?.total_tests         ?? MOCK_TESTES.length
-  const leadsAndamento = metrics?.leads_in_progress   ?? MOCK_PIPELINE.filter(l => l.etapa !== 'ativado' && l.etapa !== 'renovacao').length
-  const clientesAtivos = metrics?.active_clients      ?? MOCK_CLIENTES.filter(c => c.status === 'ativo').length
-  const creditos       = metrics?.available_credits   ?? fin.creditosDisponiveis
-  const receitaPrevista = metrics?.revenue_forecast_30d ?? fin.receitaPrevista30d
+  const testesAtivos   = dashboardMetrics?.active_tests        ?? MOCK_TESTES.filter(t => t.status === 'ativo').length
+  const testesHoje     = dashboardMetrics?.total_tests         ?? MOCK_TESTES.length
+  const leadsAndamento = dashboardMetrics?.leads_in_progress   ?? MOCK_PIPELINE.filter(l => l.etapa !== 'ativado' && l.etapa !== 'renovacao').length
+  const clientesAtivos = dashboardMetrics?.active_clients      ?? MOCK_CLIENTES.filter(c => c.status === 'ativo').length
+  const creditos       = dashboardMetrics?.available_credits   ?? fin.creditosDisponiveis
+  const receitaPrevista = dashboardMetrics?.revenue_forecast_30d ?? fin.receitaPrevista30d
 
   const serie = [
-    { label: 'Hoje', value: metrics?.revenue_current_month  ?? fin.receitaMesAtual },
-    { label: '30d',  value: metrics?.revenue_forecast_30d   ?? fin.receitaPrevista30d },
-    { label: '60d',  value: metrics?.revenue_forecast_60d   ?? fin.receitaPrevista60d },
-    { label: '90d',  value: metrics?.revenue_forecast_90d   ?? fin.receitaPrevista90d },
+    { label: 'Hoje', value: dashboardMetrics?.revenue_current_month  ?? fin.receitaMesAtual },
+    { label: '30d',  value: dashboardMetrics?.revenue_forecast_30d   ?? fin.receitaPrevista30d },
+    { label: '60d',  value: dashboardMetrics?.revenue_forecast_60d   ?? fin.receitaPrevista60d },
+    { label: '90d',  value: dashboardMetrics?.revenue_forecast_90d   ?? fin.receitaPrevista90d },
   ]
   const maxSerie = Math.max(...serie.map(s => s.value), 1)
 
   // MOCK: funil vem do pipe mock ou de metrics.funnel
-  const funil = metrics?.funnel
-    ? metrics.funnel.map(f => ({ label: f.label, value: f.count, color: f.color }))
+  const funil = dashboardMetrics?.funnel
+    ? dashboardMetrics.funnel.map(f => ({ label: f.label, value: f.count, color: f.color }))
     : [
         { label: 'Leads',     value: pipe.novo_lead + pipe.contato,    color: '#3b82f6' },
         { label: 'Testando',  value: pipe.teste_gerado + pipe.testando, color: '#f59e0b' },
@@ -59,8 +77,8 @@ export function DashboardPage({ onNavigate, metrics }: DashboardPageProps) {
       ]
 
   // MOCK: créditos vêm do mock ou de metrics.panel_credits
-  const painelCreditos = metrics?.panel_credits
-    ? metrics.panel_credits.map(c => ({ id: c.id, painel: c.panel, saldo: c.balance, alertaBaixo: c.low_balance }))
+  const painelCreditos = dashboardMetrics?.panel_credits
+    ? dashboardMetrics.panel_credits.map(c => ({ id: c.id, painel: c.panel, saldo: c.balance, alertaBaixo: c.low_balance }))
     : MOCK_CREDITOS
 
   const kpis = [
@@ -218,12 +236,12 @@ export function DashboardPage({ onNavigate, metrics }: DashboardPageProps) {
               <span
                 className="text-[10px] px-2 py-0.5 rounded-full font-medium"
                 style={{
-                  background: metrics?.data_source === 'supabase' ? 'rgba(34,197,94,0.12)' : 'rgba(245,158,11,0.12)',
-                  color:      metrics?.data_source === 'supabase' ? '#4ade80' : '#fbbf24',
-                  border:     `1px solid ${metrics?.data_source === 'supabase' ? 'rgba(34,197,94,0.25)' : 'rgba(245,158,11,0.25)'}`,
+                  background: dashboardMetrics?.data_source === 'supabase' ? 'rgba(34,197,94,0.12)' : 'rgba(245,158,11,0.12)',
+                  color:      dashboardMetrics?.data_source === 'supabase' ? '#4ade80' : '#fbbf24',
+                  border:     `1px solid ${dashboardMetrics?.data_source === 'supabase' ? 'rgba(34,197,94,0.25)' : 'rgba(245,158,11,0.25)'}`,
                 }}
               >
-                {metrics?.data_source === 'supabase' ? 'Supabase' : 'Mock'}
+                {dashboardMetrics?.data_source === 'supabase' ? 'Supabase' : 'Mock'}
               </span>
               <button
                 onClick={() => onNavigate('pipeline')}

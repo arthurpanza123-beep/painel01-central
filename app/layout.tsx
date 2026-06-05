@@ -24,6 +24,11 @@ export const metadata: Metadata = {
   title: 'Central Play Plus',
   description: 'Sistema de gerenciamento de testes, ativações e clientes',
   generator: 'v0.app',
+  icons: {
+    icon: '/favicon.png',
+    shortcut: '/favicon.png',
+    apple: '/favicon.png',
+  },
 }
 
 export const viewport: Viewport = {

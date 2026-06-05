@@ -15,8 +15,7 @@
  * será usado para queries de leitura autenticadas pelo usuário logado.
  */
 
-// TODO: instalar @supabase/supabase-js quando conectar o banco real
-// pnpm add @supabase/supabase-js
+import { createBrowserClient } from '@supabase/ssr'
 
 const supabaseUrl  = process.env.NEXT_PUBLIC_SUPABASE_URL
 const supabaseAnon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
@@ -35,15 +34,10 @@ export const isSupabaseConfigured =
  * Retorna um cliente Supabase para o browser.
  * Retorna null se as envs não estiverem configuradas.
  *
- * TODO (quando conectar banco real):
- *   import { createBrowserClient } from '@supabase/ssr'
- *   return createBrowserClient(supabaseUrl!, supabaseAnon!)
  */
 export function getSupabaseBrowserClient() {
   if (!isSupabaseConfigured) {
     return null
   }
-  // TODO: substituir pelo cliente real quando instalar @supabase/ssr
-  // return createBrowserClient(supabaseUrl!, supabaseAnon!)
-  return null
+  return createBrowserClient(supabaseUrl!, supabaseAnon!)
 }

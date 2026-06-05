@@ -1,13 +1,12 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AnimatePresence } from 'framer-motion'
 import {
   MessageCircle, CheckCircle2, CalendarClock, Copy, RefreshCw, Eye, DollarSign,
 } from 'lucide-react'
 import {
   MOCK_RENOVACOES,
-  calcularMetricasRenovacoes,
   type Renovacao,
   type StatusRenovacao,
 } from '@/lib/mock-data'
@@ -35,8 +34,33 @@ function grupoDe(r: Renovacao): GrupoId {
 
 export function RenovacoesPage() {
   const [renovacoes, setRenovacoes] = useState(MOCK_RENOVACOES)
+  const [dataSource, setDataSource] = useState<'mock' | 'supabase'>('mock')
   const { addToast } = useToast()
-  const metricas = calcularMetricasRenovacoes()
+
+  useEffect(() => {
+    let alive = true
+    async function load() {
+      try {
+        const res = await fetch('/api/renewals', { cache: 'no-store' })
+        if (!res.ok) throw new Error('Falha ao carregar renovacoes')
+        const payload = await res.json()
+        if (!alive) return
+        setRenovacoes(Array.isArray(payload.items) ? payload.items : MOCK_RENOVACOES)
+        setDataSource(payload.data_source === 'supabase' ? 'supabase' : 'mock')
+      } catch {
+        if (!alive) return
+        setRenovacoes(MOCK_RENOVACOES)
+        setDataSource('mock')
+      }
+    }
+    load()
+    return () => { alive = false }
+  }, [])
+
+  const metricas = {
+    vencemHoje: renovacoes.filter((r) => r.diasRestantes === 0).length,
+    vencemEm7Dias: renovacoes.filter((r) => r.diasRestantes > 0 && r.diasRestantes <= 7).length,
+  }
 
   const handleWhatsApp = (r: Renovacao) => {
     const tel = r.telefone.replace(/\D/g, '')
@@ -88,6 +112,10 @@ export function RenovacoesPage() {
         <h1 className="text-2xl font-bold text-white mb-2" style={{ fontFamily: 'var(--font-display)' }}>Renovacoes</h1>
         <p className="text-slate-500 text-sm">
           {urgentes} urgentes · R$ {valorTotal.toFixed(0)} a receber
+        </p>
+        <p className="mt-2 inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-medium"
+           style={{ background: dataSource === 'supabase' ? 'rgba(34,197,94,0.12)' : 'rgba(245,158,11,0.12)', color: dataSource === 'supabase' ? '#4ade80' : '#fbbf24' }}>
+          Fonte: {dataSource === 'supabase' ? 'Supabase' : 'Mock'}
         </p>
       </div>
 

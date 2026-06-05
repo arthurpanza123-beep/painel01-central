@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { GerarTesteWizard } from '@/components/gerar-teste/gerar-teste-wizard'
 import { TestesPage } from '@/components/pages/testes-page'
 import { ClientesPage } from '@/components/pages/clientes-page'
@@ -29,6 +29,15 @@ export type NavPage =
 
 export default function App() {
   const [page, setPage] = useState<NavPage>('dashboard')
+
+  useEffect(() => {
+    const onNavigate = (event: Event) => {
+      const detail = (event as CustomEvent<{ page?: NavPage }>).detail
+      if (detail?.page) setPage(detail.page)
+    }
+    window.addEventListener('centralplay:navigate', onNavigate)
+    return () => window.removeEventListener('centralplay:navigate', onNavigate)
+  }, [])
 
   return (
     <div className="flex min-h-screen" style={{ background: 'var(--background)' }}>

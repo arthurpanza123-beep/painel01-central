@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import {
   DollarSign, TrendingUp, CreditCard, AlertTriangle,
@@ -7,10 +8,57 @@ import {
 } from 'lucide-react'
 import {
   MOCK_CREDITOS, MOCK_CLIENTES,
-  calcularMetricasFinanceiro,
-  calcularMetricasTestes,
   type CreditoPainel,
 } from '@/lib/mock-data'
+
+type FinanceData = {
+  data_source: 'mock' | 'supabase'
+  metrics: {
+    receitaMesAtual: number
+    receitaPrevista30d: number
+    receitaPrevista60d: number
+    receitaPrevista90d: number
+    lucroEstimado: number
+    renovacoesPrevistas: number
+    creditosDisponiveis: number
+    ticketMedio: number
+    clientesAtivos: number
+    conversaoDia: number
+    testesPagos: number
+    testesAtivosHoje: number
+  }
+  porPlano: { plano: string; valor: number }[]
+  creditos: CreditoPainel[]
+}
+
+function buildFallbackFinance(): FinanceData {
+  const clientesAtivos = MOCK_CLIENTES.filter(c => c.status === 'ativo')
+  const receitaMesAtual = clientesAtivos.reduce((acc, c) => acc + c.valor, 0)
+  const porPlanoMap = clientesAtivos.reduce<Record<string, number>>((acc, c) => {
+    acc[c.plano] = (acc[c.plano] || 0) + c.valor
+    return acc
+  }, {})
+
+  return {
+    data_source: 'mock',
+    metrics: {
+      receitaMesAtual,
+      receitaPrevista30d: receitaMesAtual,
+      receitaPrevista60d: receitaMesAtual * 2,
+      receitaPrevista90d: receitaMesAtual * 3,
+      lucroEstimado: receitaMesAtual - MOCK_CREDITOS.reduce((acc, c) => acc + (c.custoPorAtivacao * 5), 0),
+      renovacoesPrevistas: clientesAtivos.length,
+      creditosDisponiveis: MOCK_CREDITOS.reduce((acc, c) => acc + c.saldo, 0),
+      ticketMedio: clientesAtivos.length ? receitaMesAtual / clientesAtivos.length : 0,
+      clientesAtivos: clientesAtivos.length,
+      conversaoDia: 0,
+      testesPagos: 0,
+      testesAtivosHoje: 0,
+    },
+    porPlano: Object.entries(porPlanoMap).map(([plano, valor]) => ({ plano, valor })).sort((a, b) => b.valor - a.valor),
+    creditos: MOCK_CREDITOS,
+  }
+}
 
 // ——— KPI grande ———
 function BigKPI({
@@ -119,30 +167,37 @@ function CreditoCard({ credito }: { credito: CreditoPainel }) {
 
 // ——— Page ———
 export function FinanceiroPage() {
-  const fin = calcularMetricasFinanceiro()
-  const testes = calcularMetricasTestes()
-  const creditosBaixos = MOCK_CREDITOS.filter(c => c.alertaBaixo)
-
-  const clientesAtivos = MOCK_CLIENTES.filter(c => c.status === 'ativo')
-  const ticketMedio = clientesAtivos.length ? fin.receitaMesAtual / clientesAtivos.length : 0
-
-  // Receita por plano
-  const porPlanoMap = clientesAtivos.reduce<Record<string, number>>((acc, c) => {
-    acc[c.plano] = (acc[c.plano] || 0) + c.valor
-    return acc
-  }, {})
-  const porPlano = Object.entries(porPlanoMap)
-    .map(([plano, valor]) => ({ plano, valor }))
-    .sort((a, b) => b.valor - a.valor)
+  const [finance, setFinance] = useState<FinanceData>(buildFallbackFinance)
+  const fin = finance.metrics
+  const creditosBaixos = finance.creditos.filter(c => c.alertaBaixo)
+  const porPlano = finance.porPlano
   const maxPlano = Math.max(...porPlano.map(p => p.valor), 1)
 
   const maxProjecao = Math.max(fin.receitaPrevista30d, fin.receitaPrevista60d, fin.receitaPrevista90d) * 1.1
 
   // Conversões (funil resumido)
   const conversoes = [
-    { label: 'Conversão hoje', value: testes.conversaoDia, color: '#a78bfa' },
-    { label: 'Testes → pagos', value: testes.testesPagos && testes.testesAtivosHoje ? (testes.testesPagos / (testes.testesPagos + testes.testesAtivosHoje)) * 100 : testes.conversaoDia, color: '#22c55e' },
+    { label: 'Conversão hoje', value: fin.conversaoDia, color: '#a78bfa' },
+    { label: 'Testes → pagos', value: fin.testesPagos && fin.testesAtivosHoje ? (fin.testesPagos / (fin.testesPagos + fin.testesAtivosHoje)) * 100 : fin.conversaoDia, color: '#22c55e' },
   ]
+
+  useEffect(() => {
+    let alive = true
+    async function load() {
+      try {
+        const res = await fetch('/api/finance', { cache: 'no-store' })
+        if (!res.ok) throw new Error('Falha ao carregar financeiro')
+        const payload = await res.json()
+        if (!alive) return
+        setFinance(payload?.metrics && Array.isArray(payload.creditos) ? payload : buildFallbackFinance())
+      } catch {
+        if (!alive) return
+        setFinance(buildFallbackFinance())
+      }
+    }
+    load()
+    return () => { alive = false }
+  }, [])
 
   return (
     <div className="flex-1 flex flex-col items-center px-6 py-10 min-h-screen">
@@ -157,6 +212,10 @@ export function FinanceiroPage() {
         </div>
         <h1 className="text-3xl font-bold text-white mb-2" style={{ fontFamily: 'var(--font-display)' }}>Financeiro</h1>
         <p className="text-slate-500">Receita, conversões e saúde dos painéis</p>
+        <p className="mt-2 inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-medium"
+           style={{ background: finance.data_source === 'supabase' ? 'rgba(34,197,94,0.12)' : 'rgba(245,158,11,0.12)', color: finance.data_source === 'supabase' ? '#4ade80' : '#fbbf24' }}>
+          Fonte: {finance.data_source === 'supabase' ? 'Supabase' : 'Mock'}
+        </p>
       </motion.div>
 
       {/* KPIs grandes */}
@@ -164,7 +223,7 @@ export function FinanceiroPage() {
         <BigKPI label="Receita atual" value={`R$ ${fin.receitaMesAtual.toFixed(0)}`} color="#22c55e" sub="+12% este mês" icon={DollarSign} />
         <BigKPI label="Prevista (30d)" value={`R$ ${fin.receitaPrevista30d.toFixed(0)}`} color="#60a5fa" sub="próximos 30 dias" icon={TrendingUp} />
         <BigKPI label="Lucro estimado" value={`R$ ${fin.lucroEstimado.toFixed(0)}`} color="#a78bfa" icon={Target} />
-        <BigKPI label="Ticket médio" value={`R$ ${ticketMedio.toFixed(0)}`} color="#f59e0b" icon={Wallet} />
+        <BigKPI label="Ticket médio" value={`R$ ${fin.ticketMedio.toFixed(0)}`} color="#f59e0b" icon={Wallet} />
       </div>
 
       {/* Receita por plano + Conversões */}
@@ -202,7 +261,7 @@ export function FinanceiroPage() {
             ))}
             <div className="pt-2 grid grid-cols-2 gap-3">
               <div className="rounded-xl p-3 text-center" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border)' }}>
-                <p className="text-xl font-bold text-white" style={{ fontFamily: 'var(--font-display)' }}>{clientesAtivos.length}</p>
+                <p className="text-xl font-bold text-white" style={{ fontFamily: 'var(--font-display)' }}>{fin.clientesAtivos}</p>
                 <p className="text-[10px] text-slate-500">clientes ativos</p>
               </div>
               <div className="rounded-xl p-3 text-center" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border)' }}>
@@ -262,7 +321,7 @@ export function FinanceiroPage() {
           <span className="text-xs text-slate-500">Total: R$ {fin.creditosDisponiveis.toFixed(0)}</span>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {MOCK_CREDITOS.map((credito) => (
+          {finance.creditos.map((credito) => (
             <CreditoCard key={credito.id} credito={credito} />
           ))}
         </div>

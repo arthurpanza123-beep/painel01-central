@@ -3,8 +3,9 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-  MessageCircle, Copy, CheckCircle, ArrowRight, ArrowLeft,
-  RotateCcw, Zap, Server, User, Phone, ChevronDown
+  Copy, CheckCircle, ArrowRight, ArrowLeft,
+  RotateCcw, Zap, Server, User, Phone, ChevronDown,
+  ExternalLink, PlayCircle, FileText
 } from 'lucide-react'
 import { useToast } from '@/components/ui/toast'
 import { cn } from '@/lib/utils'
@@ -20,14 +21,34 @@ interface FormData {
   telefone: string
   app: string
   servidor: string
+  deviceKey: string
 }
 
 interface TesteGerado {
+  id: string
+  pedido: string
+  host: string
   codigo: string
   usuario: string
   senha: string
   validade: string
   mensagem: string
+  deviceKey?: string
+  xcloudWorker?: {
+    status: string
+    stage: string
+    device_added: boolean
+    device_found?: boolean
+    device_deactivated?: boolean
+    device_deleted?: boolean
+    device_recreated?: boolean
+    device_already_exists?: boolean
+    xtream_attached: boolean
+    confirmation_found: boolean
+    log_id?: string | null
+    screenshot_path?: string | null
+    message?: string
+  }
   /** Indica de onde vieram os dados: gravou no Supabase ou apenas mock local */
   source: 'supabase' | 'mock'
 }
@@ -44,7 +65,7 @@ const APPS = [
     color: '#14b8a6',
     glow: '20,184,166',
     image: 'https://hebbkx1anhila5yf.public.blob.vercel-storage.com/140bd867-bdd4-43d8-9369-ae5c22b722b1-bivziPC07NHSLi0lwTyEWq4Xwga3zK.png',
-    servidorPadrao: 'ninety',
+    servidorPadrao: 'yellow',
     servidoresCompativeis: ['ninety', 'yellow'],
   },
   {
@@ -68,17 +89,6 @@ const APPS = [
     image: 'https://hebbkx1anhila5yf.public.blob.vercel-storage.com/image-9cnCrfCm5sltPhvF9J8wZrEp42Ech7.png',
     servidorPadrao: 'yellow',
     servidoresCompativeis: ['yellow', 'ninety'],
-  },
-  {
-    id: 'smartstb',
-    label: 'Smart STB',
-    badge: 'SMART TV',
-    badgeColor: '#3b82f6',
-    color: '#3b82f6',
-    glow: '59,130,246',
-    image: 'https://hebbkx1anhila5yf.public.blob.vercel-storage.com/9f711896-c0bd-4d2f-bf93-59bb74f72a37-eGBRUrOFdFo4WivuZxGe57qT59c5h7.png',
-    servidorPadrao: 'cinemax',
-    servidoresCompativeis: ['cinemax', 'ninety'],
   },
 ]
 
@@ -136,7 +146,44 @@ function gerarDadosFake(form: FormData): TesteGerado {
   const appLabel = APPS.find((a) => a.id === form.app)?.label ?? form.app
   const servidorLabel = SERVIDORES.find((s) => s.id === form.servidor)?.label ?? form.servidor
   const mensagem = `Olá ${form.nome}! Segue seu teste de 2 horas:\n\nAplicativo: ${appLabel}\nServidor: ${servidorLabel}\nUsuário: ${usuario}\nSenha: ${senha}\nCódigo: ${codigo}\nValidade: ${validade}\n\nQualquer dúvida é só chamar!`
-  return { codigo, usuario, senha, validade, mensagem, source: 'mock' }
+  return { id: '', pedido: codigo, host: 'mock-yellowbox.local', codigo, usuario, senha, validade, mensagem, deviceKey: form.deviceKey, source: 'mock' }
+}
+
+function formatDateTime(value: string): string {
+  if (!value) return ''
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return value
+  return parsed.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
+}
+
+function normalizeXcloudWorker(data: Record<string, unknown> | null | undefined, fallbackStage = 'GenerateAccess'): TesteGerado['xcloudWorker'] | undefined {
+  if (!data) return undefined
+  return {
+    status: String(data.status || (data.success ? 'success' : 'failed')),
+    stage: String(data.stage || fallbackStage),
+    device_added: Boolean(data.device_added),
+    device_found: Boolean(data.device_found),
+    device_deactivated: Boolean(data.device_deactivated),
+    device_deleted: Boolean(data.device_deleted),
+    device_recreated: Boolean(data.device_recreated),
+    device_already_exists: Boolean(data.device_already_exists),
+    xtream_attached: Boolean(data.xtream_attached),
+    confirmation_found: Boolean(data.confirmation_found),
+    log_id: typeof data.log_id === 'string' ? data.log_id : null,
+    screenshot_path: typeof data.screenshot_path === 'string' ? data.screenshot_path : null,
+    message: String(data.message || data.error || (data.status === 'disabled' ? 'Worker XCloud desativado no servidor' : '') || '') || undefined,
+  }
+}
+
+function pendingXcloudWorker(): TesteGerado['xcloudWorker'] {
+  return {
+    status: 'pending',
+    stage: 'AddXcloudDevice',
+    device_added: false,
+    xtream_attached: false,
+    confirmation_found: false,
+    message: 'Acesso Yellow gerado. Execute o XCloud real quando estiver pronto.',
+  }
 }
 
 // ----------------------------------------------------------------
@@ -279,12 +326,15 @@ function NeonBackground() {
 export function GerarTesteWizard() {
   const [wizardStep, setWizardStep] = useState<WizardStep>(1)
   const [processStep, setProcessStep] = useState<ProcessStep | null>(null)
-  const [form, setForm] = useState<FormData>({ nome: '', telefone: '', app: '', servidor: '' })
+  const [form, setForm] = useState<FormData>({ nome: '', telefone: '', app: '', servidor: '', deviceKey: '' })
   const [etapaAtual, setEtapaAtual] = useState(0)
   const [etapasFeitas, setEtapasFeitas] = useState<Set<number>>(new Set())
   const [teste, setTeste] = useState<TesteGerado | null>(null)
   const [copied, setCopied] = useState(false)
   const [mostrarServidores, setMostrarServidores] = useState(false)
+  const [confirmarRecriacaoXcloud, setConfirmarRecriacaoXcloud] = useState(false)
+  const [recriandoXcloud, setRecriandoXcloud] = useState(false)
+  const [executandoXcloud, setExecutandoXcloud] = useState(false)
   // slide direction: 1 = avançar (esquerda→direita), -1 = voltar
   const [direction, setDirection] = useState<1 | -1>(1)
   const { addToast } = useToast()
@@ -314,40 +364,54 @@ export function GerarTesteWizard() {
 
     // Chama o endpoint — aguarda o tempo mínimo da animação
     const minDelay = ETAPAS_GERACAO.length * 650 + 400
-    const fetchTeste = async (): Promise<TesteGerado> => {
+    const fetchTeste = async (): Promise<TesteGerado | null> => {
       try {
-        const res = await fetch('/api/tests/create-mock', {
+        const res = await fetch('/api/tests/create', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            nome:     form.nome,
-            telefone: form.telefone,
-            app:      form.app,
-            servidor: form.servidor,
+            client_name: form.nome,
+            phone: form.telefone,
+            app_key: form.app,
+            panel_key: form.servidor,
+            device_key: form.app === 'xcloud' ? form.deviceKey : undefined,
           }),
         })
-        if (!res.ok) throw new Error(`HTTP ${res.status}`)
         const data = await res.json()
+        if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`)
         if (!data.success) throw new Error(data.error ?? 'Erro desconhecido')
+        const xcloudWorker: TesteGerado['xcloudWorker'] | undefined = form.app === 'xcloud' && data.test.id
+          ? pendingXcloudWorker()
+          : undefined
+
         return {
-          codigo:   data.test.code,
-          usuario:  data.test.username,   // já mascarado pela API
-          senha:    data.test.password,   // já mascarado pela API
-          validade: data.test.validadeBR,
+          id:       data.test.id,
+          pedido:   data.test.pedido || data.test.order_id || '',
+          host:     data.test.host || data.test.dns || '',
+          codigo:   data.test.provider_code || data.test.code || '',
+          usuario:  data.test.username || '',
+          senha:    data.test.password || '',
+          validade: formatDateTime(data.test.expires_at || data.test.validade || ''),
           mensagem: data.test.mensagem,
+          deviceKey: data.test.device_key || undefined,
+          xcloudWorker,
           source:   data.source,
         }
       } catch (err) {
-        // Fallback local — nunca chama API externa
-        console.error('[wizard] Fallback para geração local:', err)
-        const result = gerarDadosFake(form)
-        return { ...result, source: 'mock' as const }
+        const message = err instanceof Error ? err.message : 'Falha ao gerar teste'
+        console.error('[wizard] Falha ao gerar teste:', err)
+        addToast('error', message)
+        return null
       }
     }
 
     // Aguarda o mínimo da animação antes de exibir sucesso
     timers.push(setTimeout(async () => {
       const resultado = await fetchTeste()
+      if (!resultado) {
+        setProcessStep(null)
+        return
+      }
       setTeste(resultado)
       setProcessStep('sucesso')
     }, minDelay))
@@ -383,6 +447,10 @@ export function GerarTesteWizard() {
       addToast('error', 'Preencha todos os campos')
       return
     }
+    if (form.app === 'xcloud' && !form.deviceKey.trim()) {
+      addToast('error', 'Informe a device key do XCloud')
+      return
+    }
     setProcessStep('gerando')
   }
 
@@ -394,21 +462,137 @@ export function GerarTesteWizard() {
     setTimeout(() => setCopied(false), 2000)
   }
 
-  const handleWhatsApp = () => {
-    const tel = form.telefone.replace(/\D/g, '')
-    const msg = encodeURIComponent(teste?.mensagem || '')
-    window.open(`https://wa.me/55${tel}?text=${msg}`, '_blank')
-    addToast('success', 'Abrindo WhatsApp...')
+  const handleAbrirPainel2 = () => {
+    window.open('https://painel2.centralplayplus.com.br', '_blank')
+  }
+
+  const handleAtivarCliente = () => {
+    if (!teste?.id) return
+    window.dispatchEvent(new CustomEvent('centralplay:navigate', { detail: { page: 'contas', test_id: teste.id } }))
+    addToast('success', 'Abrindo ativação do cliente')
+  }
+
+  const handleVerLog = () => {
+    window.dispatchEvent(new CustomEvent('centralplay:navigate', { detail: { page: 'debug', test_id: teste?.id } }))
+    addToast('success', 'Abrindo log')
+  }
+
+  const handleRetryXcloud = async () => {
+    if (!teste?.id || executandoXcloud) return
+    const retryStage = teste.xcloudWorker?.stage === 'AttachXtreamCredentials' ? 'AttachXtreamCredentials' : 'AddXcloudDevice'
+    const shouldSendRetryStage = teste.xcloudWorker?.status !== 'pending' && teste.xcloudWorker?.status !== 'disabled'
+    setExecutandoXcloud(true)
+    setTeste({
+      ...teste,
+      xcloudWorker: {
+        ...(teste.xcloudWorker || pendingXcloudWorker())!,
+        status: 'running',
+        stage: shouldSendRetryStage ? retryStage : 'AddXcloudDevice',
+        message: 'Executando XCloud real...',
+      },
+    })
+    try {
+      const res = await fetch('/api/xcloud/activate-device', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          test_id: teste.id,
+          ...(shouldSendRetryStage ? { retry_stage: retryStage } : {}),
+        }),
+      })
+      const data = await res.json().catch(() => null)
+      if (!data) throw new Error('Resposta vazia do Worker XCloud')
+      const normalized = normalizeXcloudWorker(data, retryStage)!
+      setTeste((prev) => prev ? {
+        ...prev,
+        xcloudWorker: {
+          ...normalized,
+          message: normalized.status === 'failed' ? `XCloud falhou na etapa: ${normalized.stage}` : normalized.message,
+        },
+      } : prev)
+      addToast(data.success ? 'success' : 'error', data.success ? 'Worker XCloud executado' : `XCloud falhou na etapa: ${data.stage || retryStage}`)
+    } catch (err) {
+      setTeste((prev) => prev ? {
+        ...prev,
+        xcloudWorker: {
+          ...(prev.xcloudWorker || pendingXcloudWorker())!,
+          status: 'failed',
+          stage: retryStage,
+          message: err instanceof Error ? err.message : `XCloud falhou na etapa: ${retryStage}`,
+        },
+      } : prev)
+      addToast('error', err instanceof Error ? err.message : 'Worker XCloud falhou')
+    } finally {
+      setExecutandoXcloud(false)
+    }
+  }
+
+  const handleRecriarXcloud = async () => {
+    if (!teste?.id || recriandoXcloud) return
+    setRecriandoXcloud(true)
+    setConfirmarRecriacaoXcloud(false)
+    setTeste({
+      ...teste,
+      xcloudWorker: {
+        ...(teste.xcloudWorker || {
+          status: 'running',
+          stage: 'FindXcloudDevice',
+          device_added: false,
+          xtream_attached: false,
+          confirmation_found: false,
+        }),
+        status: 'running',
+        stage: 'FindXcloudDevice',
+        message: 'Recriando device XCloud...',
+      },
+    })
+    const res = await fetch('/api/xcloud/activate-device', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ test_id: teste.id, mode: 'recreate_device', confirm_recreate: true }),
+    })
+    const data = await res.json().catch(() => null)
+    setRecriandoXcloud(false)
+    if (!data) {
+      addToast('error', 'Worker XCloud falhou')
+      return
+    }
+    setTeste((prev) => prev ? {
+      ...prev,
+      xcloudWorker: {
+        status: data.status || (data.success ? 'success' : 'failed'),
+        stage: data.stage || 'FindXcloudDevice',
+        device_added: Boolean(data.device_added),
+        device_found: Boolean(data.device_found),
+        device_deactivated: Boolean(data.device_deactivated),
+        device_deleted: Boolean(data.device_deleted),
+        device_recreated: Boolean(data.device_recreated),
+        device_already_exists: Boolean(data.device_already_exists),
+        xtream_attached: Boolean(data.xtream_attached),
+        confirmation_found: Boolean(data.confirmation_found),
+        log_id: data.log_id || null,
+        screenshot_path: data.screenshot_path || null,
+        message: data.message || data.error || undefined,
+      },
+    } : prev)
+    addToast(data.success ? 'success' : 'error', data.success ? 'Device XCloud recriada' : 'Recriação XCloud falhou')
+  }
+
+  const handleModoManual = () => {
+    addToast('info', 'Modo manual: use os dados gerados para configurar o XCloud diretamente no painel.')
   }
 
   const handleNovoTeste = () => {
     setProcessStep(null)
     setWizardStep(1)
     setDirection(1)
-    setForm({ nome: '', telefone: '', app: '', servidor: '' })
+    setForm({ nome: '', telefone: '', app: '', servidor: '', deviceKey: '' })
     setTeste(null)
     setCopied(false)
     setMostrarServidores(false)
+    setConfirmarRecriacaoXcloud(false)
+    setRecriandoXcloud(false)
+    setExecutandoXcloud(false)
   }
 
   if (processStep) {
@@ -442,7 +626,17 @@ export function GerarTesteWizard() {
                 teste={teste}
                 copied={copied}
                 onCopiar={handleCopiar}
-                onWhatsApp={handleWhatsApp}
+                onAbrirPainel2={handleAbrirPainel2}
+                onAtivarCliente={handleAtivarCliente}
+                onVerLog={handleVerLog}
+                onRetryXcloud={handleRetryXcloud}
+                onSolicitarRecriacaoXcloud={() => setConfirmarRecriacaoXcloud(true)}
+                onCancelarRecriacaoXcloud={() => setConfirmarRecriacaoXcloud(false)}
+                onConfirmarRecriacaoXcloud={handleRecriarXcloud}
+                confirmarRecriacaoXcloud={confirmarRecriacaoXcloud}
+                recriandoXcloud={recriandoXcloud}
+                executandoXcloud={executandoXcloud}
+                onModoManual={handleModoManual}
                 onNovo={handleNovoTeste}
               />
             </motion.div>
@@ -566,7 +760,7 @@ export function GerarTesteWizard() {
                 exit="exit"
                 transition={{ duration: 0.25, ease: 'easeInOut' }}
               >
-                <StepConfirmar form={form} onBack={handleBack} onGerar={handleGerar} />
+                <StepConfirmar form={form} onChange={setForm} onBack={handleBack} onGerar={handleGerar} />
               </motion.div>
             )}
           </AnimatePresence>
@@ -820,10 +1014,12 @@ function StepServidor({
 // ----------------------------------------------------------------
 function StepConfirmar({
   form,
+  onChange,
   onBack,
   onGerar,
 }: {
   form: FormData
+  onChange: (f: FormData) => void
   onBack: () => void
   onGerar: () => void
 }) {
@@ -857,6 +1053,18 @@ function StepConfirmar({
         <ResumoItem label="Aplicativo" value={appSelecionado?.label || ''} />
         <ResumoItem label="Servidor" value={servidorSelecionado?.label || ''} />
       </div>
+
+      {form.app === 'xcloud' && (
+        <div className="mb-7">
+          <InputField
+            icon={<Zap className="h-[18px] w-[18px]" />}
+            label="Device key XCloud"
+            placeholder="Informe a chave do dispositivo"
+            value={form.deviceKey}
+            onChange={(val) => onChange({ ...form, deviceKey: val })}
+          />
+        </div>
+      )}
 
       <div className="flex gap-3">
         <SecondaryButton onClick={onBack}>
@@ -1035,18 +1243,46 @@ function TelaSucesso({
   teste,
   copied,
   onCopiar,
-  onWhatsApp,
+  onAbrirPainel2,
+  onAtivarCliente,
+  onVerLog,
+  onRetryXcloud,
+  onSolicitarRecriacaoXcloud,
+  onCancelarRecriacaoXcloud,
+  onConfirmarRecriacaoXcloud,
+  confirmarRecriacaoXcloud,
+  recriandoXcloud,
+  executandoXcloud,
+  onModoManual,
   onNovo,
 }: {
   form: FormData
   teste: TesteGerado
   copied: boolean
   onCopiar: () => void
-  onWhatsApp: () => void
+  onAbrirPainel2: () => void
+  onAtivarCliente: () => void
+  onVerLog: () => void
+  onRetryXcloud: () => void
+  onSolicitarRecriacaoXcloud: () => void
+  onCancelarRecriacaoXcloud: () => void
+  onConfirmarRecriacaoXcloud: () => void
+  confirmarRecriacaoXcloud: boolean
+  recriandoXcloud: boolean
+  executandoXcloud: boolean
+  onModoManual: () => void
   onNovo: () => void
 }) {
   const appLabel = APPS.find((a) => a.id === form.app)?.label ?? form.app
   const servidorLabel = SERVIDORES.find((s) => s.id === form.servidor)?.label ?? form.servidor
+  const recreateStages = [
+    { stage: 'FindXcloudDevice', label: 'Localizando device', done: teste.xcloudWorker?.device_found },
+    { stage: 'DeactivateXcloudDevice', label: 'Desativando device', done: teste.xcloudWorker?.device_deactivated },
+    { stage: 'DeleteXcloudDevice', label: 'Excluindo device', done: teste.xcloudWorker?.device_deleted },
+    { stage: 'ReAddXcloudDevice', label: 'Cadastrando novamente', done: teste.xcloudWorker?.device_recreated || teste.xcloudWorker?.device_added },
+    { stage: 'AttachXtreamCredentials', label: 'Vinculando Xtream', done: teste.xcloudWorker?.xtream_attached },
+    { stage: 'Completed', label: 'Confirmando RELOAD', done: teste.xcloudWorker?.confirmation_found },
+  ]
 
   return (
     <motion.div
@@ -1112,10 +1348,13 @@ function TelaSucesso({
               { label: 'Telefone', value: form.telefone },
               { label: 'Aplicativo', value: appLabel },
               { label: 'Servidor', value: servidorLabel },
+              { label: 'Pedido', value: teste.pedido || '-' },
+              { label: 'Host', value: teste.host || '-' },
               { label: 'Usuário', value: teste.usuario },
               { label: 'Senha', value: teste.senha },
-              { label: 'Código', value: teste.codigo },
+              { label: 'Código', value: teste.codigo || '-' },
               { label: 'Validade', value: teste.validade },
+              ...(form.app === 'xcloud' ? [{ label: 'Device key', value: teste.deviceKey || '-' }] : []),
             ].map((item, i) => (
               <motion.div
                 key={item.label}
@@ -1148,6 +1387,104 @@ function TelaSucesso({
             </pre>
           </motion.div>
 
+          {form.app === 'xcloud' && teste.xcloudWorker && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.65 }}
+              className="mb-5 rounded-xl p-4"
+              style={{ background: 'rgba(20,184,166,0.04)', border: '1px solid rgba(20,184,166,0.12)' }}
+            >
+              <p className="mb-3 text-[10px] font-semibold uppercase tracking-wider" style={{ color: '#2dd4bf' }}>
+                XCloud
+              </p>
+              <div className="grid grid-cols-2 gap-2.5">
+                {[
+                  { label: 'Acesso gerado', done: true },
+                  { label: 'Device adicionado', done: teste.xcloudWorker.device_added },
+                  { label: 'Xtream vinculado', done: teste.xcloudWorker.xtream_attached },
+                  { label: 'Confirmação RELOAD', done: teste.xcloudWorker.confirmation_found },
+                ].map((item) => (
+                  <div key={item.label} className="flex items-center gap-2 rounded-lg px-2.5 py-2" style={{ background: 'rgba(255,255,255,0.025)' }}>
+                    <span className="h-2 w-2 rounded-full" style={{ background: item.done ? '#22c55e' : '#64748b' }} />
+                    <span className="text-xs text-slate-300">{item.label}</span>
+                  </div>
+                ))}
+              </div>
+              {teste.xcloudWorker.status === 'success' ? (
+                <div className="mt-3">
+                  <button disabled className="w-full rounded-lg px-2 py-2 text-xs font-semibold text-emerald-200" style={{ background: 'rgba(34,197,94,0.10)', border: '1px solid rgba(34,197,94,0.18)' }}>
+                    XCloud ativado
+                  </button>
+                </div>
+              ) : (
+                <div className="mt-3 grid grid-cols-3 gap-2">
+                  <button disabled={executandoXcloud} onClick={onRetryXcloud} className="rounded-lg px-2 py-2 text-xs font-medium text-slate-200 disabled:opacity-60" style={{ background: 'rgba(37,99,235,0.12)', border: '1px solid rgba(37,99,235,0.2)' }}>
+                    {executandoXcloud ? 'Executando XCloud real...' : teste.xcloudWorker.status === 'pending' || teste.xcloudWorker.status === 'disabled' ? 'Executar XCloud real' : 'Tentar novamente'}
+                  </button>
+                  <button onClick={onModoManual} className="rounded-lg px-2 py-2 text-xs font-medium text-slate-200" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                    Modo manual
+                  </button>
+                  <button onClick={onVerLog} className="rounded-lg px-2 py-2 text-xs font-medium text-slate-200" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                    Ver print/log
+                  </button>
+                </div>
+              )}
+              <div className="mt-3 rounded-xl p-3" style={{ background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-xs font-semibold text-slate-200">Recriar device XCloud</p>
+                    <p className="mt-0.5 text-[11px] text-slate-500">Use apenas para trocar acesso do cliente ou corrigir vínculo do XCloud.</p>
+                  </div>
+                  <button
+                    onClick={onSolicitarRecriacaoXcloud}
+                    disabled={recriandoXcloud}
+                    className="h-9 rounded-lg px-3 text-xs font-semibold text-amber-100 disabled:opacity-60"
+                    style={{ background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.22)' }}
+                  >
+                    {recriandoXcloud ? 'Recriando...' : 'Recriar device'}
+                  </button>
+                </div>
+                {(confirmarRecriacaoXcloud || recriandoXcloud || teste.xcloudWorker.stage === 'FindXcloudDevice' || teste.xcloudWorker.stage === 'DeactivateXcloudDevice' || teste.xcloudWorker.stage === 'DeleteXcloudDevice' || teste.xcloudWorker.stage === 'ReAddXcloudDevice') && (
+                  <div className="mt-3 rounded-lg p-3" style={{ background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.16)' }}>
+                    {confirmarRecriacaoXcloud && (
+                      <>
+                        <p className="text-xs font-medium text-amber-100">Isso vai desativar e excluir a device no XCloud antes de cadastrar novamente. Deseja continuar?</p>
+                        <div className="mt-3 grid grid-cols-2 gap-2">
+                          <button onClick={onCancelarRecriacaoXcloud} className="h-9 rounded-lg text-xs font-medium text-slate-300" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                            Cancelar
+                          </button>
+                          <button onClick={onConfirmarRecriacaoXcloud} className="h-9 rounded-lg text-xs font-semibold text-amber-100" style={{ background: 'rgba(245,158,11,0.14)', border: '1px solid rgba(245,158,11,0.26)' }}>
+                            Confirmar recriação
+                          </button>
+                        </div>
+                      </>
+                    )}
+                    {!confirmarRecriacaoXcloud && (
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        {recreateStages.map((item) => {
+                          const active = recriandoXcloud && teste.xcloudWorker?.stage === item.stage
+                          return (
+                            <div key={item.stage} className="flex items-center gap-2 rounded-lg px-2.5 py-2" style={{ background: 'rgba(255,255,255,0.025)' }}>
+                              <span className="h-2 w-2 rounded-full" style={{ background: item.done ? '#22c55e' : active ? '#f59e0b' : '#64748b' }} />
+                              <span className="text-xs text-slate-300">{item.label}</span>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+              {teste.xcloudWorker.status === 'failed' && (
+                <p className="mt-3 text-xs text-red-300">XCloud falhou na etapa: {teste.xcloudWorker.stage}</p>
+              )}
+              {teste.xcloudWorker.message && (
+                <p className="mt-3 text-xs text-slate-500">{teste.xcloudWorker.message}</p>
+              )}
+            </motion.div>
+          )}
+
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -1164,18 +1501,18 @@ function TelaSucesso({
               }}
             >
               {copied ? <CheckCircle className="h-[18px] w-[18px] text-emerald-400" /> : <Copy className="h-[18px] w-[18px]" />}
-              {copied ? 'Copiado!' : 'Copiar mensagem'}
+              {copied ? 'Copiado!' : 'Copiar dados'}
             </button>
             <button
-              onClick={onWhatsApp}
+              onClick={onAbrirPainel2}
               className="flex h-12 items-center justify-center gap-2 rounded-xl text-sm font-bold text-white transition-all"
               style={{
-                background: 'linear-gradient(135deg, #22c55e, #16a34a)',
-                boxShadow: '0 4px 20px rgba(34,197,94,0.35)',
+                background: 'linear-gradient(135deg, #2563eb, #1d4ed8)',
+                boxShadow: '0 4px 20px rgba(37,99,235,0.35)',
               }}
             >
-              <MessageCircle className="h-[18px] w-[18px]" />
-              Abrir WhatsApp
+              <ExternalLink className="h-[18px] w-[18px]" />
+              Abrir Painel 2
             </button>
           </motion.div>
 
@@ -1183,11 +1520,23 @@ function TelaSucesso({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.8 }}
-            className="mt-3"
+            className="mt-3 grid grid-cols-1 gap-2.5 sm:grid-cols-3"
           >
             <button
+              onClick={onAtivarCliente}
+              className="flex h-11 items-center justify-center gap-2 rounded-xl text-sm font-medium transition-all hover:bg-white/[0.05]"
+              style={{
+                background: 'rgba(34,197,94,0.06)',
+                border: '1px solid rgba(34,197,94,0.14)',
+                color: '#86efac',
+              }}
+            >
+              <PlayCircle className="h-[18px] w-[18px]" />
+              Ativar cliente
+            </button>
+            <button
               onClick={onNovo}
-              className="flex w-full h-11 items-center justify-center gap-2 rounded-xl text-sm font-medium transition-all hover:bg-white/[0.05]"
+              className="flex h-11 items-center justify-center gap-2 rounded-xl text-sm font-medium transition-all hover:bg-white/[0.05]"
               style={{
                 background: 'rgba(255,255,255,0.02)',
                 border: '1px solid rgba(255,255,255,0.06)',
@@ -1195,7 +1544,19 @@ function TelaSucesso({
               }}
             >
               <RotateCcw className="h-[18px] w-[18px]" />
-              Novo teste
+              Gerar outro
+            </button>
+            <button
+              onClick={onVerLog}
+              className="flex h-11 items-center justify-center gap-2 rounded-xl text-sm font-medium transition-all hover:bg-white/[0.05]"
+              style={{
+                background: 'rgba(255,255,255,0.02)',
+                border: '1px solid rgba(255,255,255,0.06)',
+                color: '#64748b',
+              }}
+            >
+              <FileText className="h-[18px] w-[18px]" />
+              Ver log
             </button>
           </motion.div>
         </div>

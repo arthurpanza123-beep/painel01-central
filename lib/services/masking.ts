@@ -54,6 +54,29 @@ export function maskToken(value: string): string {
   return value.slice(0, 6) + '•'.repeat(8) + value.slice(-4)
 }
 
+export function maskUrl(value: string): string {
+  if (!value) return '••••'
+  try {
+    const url = new URL(value)
+    return `${url.protocol}//${url.hostname}/••••`
+  } catch {
+    return '••••'
+  }
+}
+
+export function maskDeviceKey(value: string): string {
+  if (!value || value.length <= 6) return '••••••'
+  return `${value.slice(0, 2)}${'•'.repeat(6)}${value.slice(-2)}`
+}
+
+export function maskSensitiveText(value: string): string {
+  if (!value) return value
+  return value
+    .replace(/https?:\/\/\S+/gi, (match) => maskUrl(match))
+    .replace(/\b(m3u8?|hls|token|device[_ -]?key|senha|password|usuario|username)\s*[:=]\s*\S+/gi, '$1=••••')
+    .replace(/\b[A-Za-z0-9_-]{24,}\b/g, (match) => maskToken(match))
+}
+
 /**
  * Retorna asteriscos de tamanho fixo — para campos que não devem
  * revelar nem o tamanho real.

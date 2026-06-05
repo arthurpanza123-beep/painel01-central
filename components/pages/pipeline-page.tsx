@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Kanban, X, MessageCircle, ArrowRight, Phone, Clock,
@@ -23,8 +23,29 @@ const ETAPAS: { id: EtapaPipeline; label: string; color: string; glow: string }[
 
 export function PipelinePage() {
   const [leads, setLeads] = useState<LeadPipeline[]>(MOCK_PIPELINE)
+  const [dataSource, setDataSource] = useState<'mock' | 'supabase'>('mock')
   const [selecionado, setSelecionado] = useState<LeadPipeline | null>(null)
   const { addToast } = useToast()
+
+  useEffect(() => {
+    let alive = true
+    async function load() {
+      try {
+        const res = await fetch('/api/pipeline', { cache: 'no-store' })
+        if (!res.ok) throw new Error('Falha ao carregar pipeline')
+        const payload = await res.json()
+        if (!alive) return
+        setLeads(Array.isArray(payload.items) ? payload.items : MOCK_PIPELINE)
+        setDataSource(payload.data_source === 'supabase' ? 'supabase' : 'mock')
+      } catch {
+        if (!alive) return
+        setLeads(MOCK_PIPELINE)
+        setDataSource('mock')
+      }
+    }
+    load()
+    return () => { alive = false }
+  }, [])
 
   const avancar = (lead: LeadPipeline) => {
     const idx = ETAPAS.findIndex(e => e.id === lead.etapa)
@@ -52,6 +73,10 @@ export function PipelinePage() {
             <div>
               <h1 className="text-xl font-bold text-white" style={{ fontFamily: 'var(--font-display)' }}>Pipeline</h1>
               <p className="text-xs text-slate-500">{totalDia} leads no funil · clique para detalhes</p>
+              <p className="mt-1 inline-flex items-center gap-2 rounded-full px-2.5 py-0.5 text-[10px] font-medium"
+                 style={{ background: dataSource === 'supabase' ? 'rgba(34,197,94,0.12)' : 'rgba(245,158,11,0.12)', color: dataSource === 'supabase' ? '#4ade80' : '#fbbf24' }}>
+                Fonte: {dataSource === 'supabase' ? 'Supabase' : 'Mock'}
+              </p>
             </div>
           </div>
         </div>

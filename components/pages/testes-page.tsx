@@ -7,7 +7,6 @@ import {
 } from 'lucide-react'
 import {
   MOCK_TESTES,
-  calcularMetricasTestes,
   type Teste,
   type StatusTeste
 } from '@/lib/mock-data'
@@ -187,9 +186,36 @@ function TesteCard({
 export function TestesPage() {
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusTeste | 'todos'>('todos')
-  const [testes] = useState(MOCK_TESTES)
+  const [testes, setTestes] = useState(MOCK_TESTES)
+  const [dataSource, setDataSource] = useState<'mock' | 'supabase'>('mock')
   const { addToast } = useToast()
-  const metricas = calcularMetricasTestes()
+
+  useEffect(() => {
+    let alive = true
+    async function load() {
+      try {
+        const res = await fetch('/api/tests', { cache: 'no-store' })
+        if (!res.ok) throw new Error('Falha ao carregar testes')
+        const payload = await res.json()
+        if (!alive) return
+        setTestes(Array.isArray(payload.items) ? payload.items : MOCK_TESTES)
+        setDataSource(payload.data_source === 'supabase' ? 'supabase' : 'mock')
+      } catch {
+        if (!alive) return
+        setTestes(MOCK_TESTES)
+        setDataSource('mock')
+      }
+    }
+    load()
+    return () => { alive = false }
+  }, [])
+
+  const metricas = {
+    testesAtivosHoje: testes.filter(t => t.status === 'ativo').length,
+    testesExpirando: testes.filter(t => t.status === 'ativo').length,
+    testesPagos: testes.filter(t => t.status === 'pago').length,
+    conversaoDia: testes.length > 0 ? Math.round((testes.filter(t => t.status === 'pago').length / testes.length) * 100) : 0,
+  }
 
   const testesFiltrados = testes.filter(t => {
     const matchSearch =
@@ -225,6 +251,10 @@ export function TestesPage() {
         <p className="text-slate-500 text-sm">
           {metricas.testesAtivosHoje} testes ativos
           {metricas.testesExpirando > 0 && ` · ${metricas.testesExpirando} expirando em breve`}
+        </p>
+        <p className="mt-2 inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-medium"
+           style={{ background: dataSource === 'supabase' ? 'rgba(34,197,94,0.12)' : 'rgba(245,158,11,0.12)', color: dataSource === 'supabase' ? '#4ade80' : '#fbbf24' }}>
+          Fonte: {dataSource === 'supabase' ? 'Supabase' : 'Mock'}
         </p>
       </div>
 

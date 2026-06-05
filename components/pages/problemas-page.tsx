@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   AlertTriangle, CheckCircle2, Cpu, Terminal, ChevronRight, X, Send, Clock,
@@ -218,9 +218,30 @@ data/hora: ${problema.criadoEm}${obs ? `\nobservacao: ${obs}` : ''}`
 export function ProblemasPage() {
   const [filter, setFilter] = useState<StatusProblema | 'todos'>('todos')
   const [problemas, setProblemas] = useState(MOCK_PROBLEMAS)
+  const [dataSource, setDataSource] = useState<'mock' | 'supabase'>('mock')
   const [expanded, setExpanded] = useState<string | null>(null)
   const [codexTarget, setCodexTarget] = useState<Problema | null>(null)
   const { addToast } = useToast()
+
+  useEffect(() => {
+    let alive = true
+    async function load() {
+      try {
+        const res = await fetch('/api/problems', { cache: 'no-store' })
+        if (!res.ok) throw new Error('Falha ao carregar problemas')
+        const payload = await res.json()
+        if (!alive) return
+        setProblemas(Array.isArray(payload.items) ? payload.items : MOCK_PROBLEMAS)
+        setDataSource(payload.data_source === 'supabase' ? 'supabase' : 'mock')
+      } catch {
+        if (!alive) return
+        setProblemas(MOCK_PROBLEMAS)
+        setDataSource('mock')
+      }
+    }
+    load()
+    return () => { alive = false }
+  }, [])
 
   const metricas = {
     abertos: problemas.filter((p) => p.status === 'aberto').length,
@@ -252,6 +273,10 @@ export function ProblemasPage() {
           <h1 className="text-2xl font-bold text-white mb-2" style={{ fontFamily: 'var(--font-display)' }}>Problemas</h1>
           <p className="text-slate-500 text-sm">
             {metricas.abertos} abertos · {metricas.emAnalise} em analise · {metricas.resolvidos} resolvidos
+          </p>
+          <p className="mt-2 inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-medium"
+             style={{ background: dataSource === 'supabase' ? 'rgba(34,197,94,0.12)' : 'rgba(245,158,11,0.12)', color: dataSource === 'supabase' ? '#4ade80' : '#fbbf24' }}>
+            Fonte: {dataSource === 'supabase' ? 'Supabase' : 'Mock'}
           </p>
         </div>
 

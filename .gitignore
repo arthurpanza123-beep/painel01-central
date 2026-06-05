@@ -7,9 +7,25 @@ __v0_jsx-dev-runtime.ts
 .vercel/
 
 # Environment variables
-.env*.local
+.env
+.env.*
+!.env.example
 
 # Common ignores
 node_modules
 .next/
 .DS_Store
+.migration-output/
+/storage/
+/storage/screenshots/
+/logs/
+*.log
+.xcloud-profile/
+/playwright/.auth/
+/cookies/
+/sessions/
+/backups/
+*.tar.gz
+*.zip
+/tmp/
+/private/

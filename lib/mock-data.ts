@@ -1,5 +1,3 @@
-'use client'
-
 // ===================== TIPOS =====================
 
 export type StatusTeste = 'ativo' | 'expirado' | 'pago' | 'sem_resposta'

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { 
   Terminal, 
@@ -48,8 +48,29 @@ function LogLine({ log }: { log: LogEntry }) {
 // ——— Page ———
 export function DebugPage() {
   const [logs, setLogs] = useState(MOCK_LOGS)
+  const [dataSource, setDataSource] = useState<'mock' | 'supabase'>('mock')
   const [filter, setFilter] = useState<string>('todos')
   const { addToast } = useToast()
+
+  useEffect(() => {
+    let alive = true
+    async function load() {
+      try {
+        const res = await fetch('/api/logs', { cache: 'no-store' })
+        if (!res.ok) throw new Error('Falha ao carregar logs')
+        const payload = await res.json()
+        if (!alive) return
+        setLogs(Array.isArray(payload.items) ? payload.items : MOCK_LOGS)
+        setDataSource(payload.data_source === 'supabase' ? 'supabase' : 'mock')
+      } catch {
+        if (!alive) return
+        setLogs(MOCK_LOGS)
+        setDataSource('mock')
+      }
+    }
+    load()
+    return () => { alive = false }
+  }, [])
 
   const logsFiltrados = logs.filter(l => {
     if (filter === 'todos') return true
@@ -71,7 +92,7 @@ export function DebugPage() {
 
   const handleClear = () => {
     setLogs([])
-    addToast('info', 'Logs limpos')
+    addToast('info', 'Console limpo localmente')
   }
 
   return (
@@ -88,6 +109,10 @@ export function DebugPage() {
           <div>
             <h1 className="text-lg font-semibold text-white">Debug</h1>
             <p className="text-xs text-slate-500">{metricas.total} logs · {metricas.erros} erros</p>
+            <p className="mt-1 inline-flex items-center gap-2 rounded-full px-2.5 py-0.5 text-[10px] font-medium"
+               style={{ background: dataSource === 'supabase' ? 'rgba(34,197,94,0.12)' : 'rgba(245,158,11,0.12)', color: dataSource === 'supabase' ? '#4ade80' : '#fbbf24' }}>
+              Fonte: {dataSource === 'supabase' ? 'Supabase' : 'Mock'}
+            </p>
           </div>
         </div>
 
