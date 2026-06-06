@@ -20,7 +20,7 @@ const STEP_DEFS = [
   { id: 'dispositivo', label: 'Criando device XCloud', start: ['XCLOUD_WORKER_STARTED', 'XCLOUD_DEVICE_LIST_REFRESHED'], done: ['XCLOUD_DEVICE_ADDED', 'XCLOUD_DEVICE_ROW_FOUND', 'XCLOUD_DEVICE_READY_FOR_XTREAM'] },
   { id: 'servidor', label: 'Vinculando servidor Xtream', start: ['XCLOUD_XTREAM_ATTACH_STARTED'], done: ['XCLOUD_XTREAM_ATTACHED'] },
   { id: 'reload', label: 'Confirmando RELOAD', start: ['XCLOUD_XTREAM_ATTACHED'], done: ['XCLOUD_WORKER_COMPLETED', 'XCLOUD_RECREATE_CONFIRMED'] },
-  { id: 'mensagem', label: 'Preparando mensagem', start: ['XCLOUD_WORKER_COMPLETED', 'XCLOUD_RECREATE_CONFIRMED', 'TEST_CREATED'], done: ['TEST_MESSAGE_PREPARED'] },
+  { id: 'mensagem', label: 'Enviando mensagem', start: ['XCLOUD_WORKER_COMPLETED', 'XCLOUD_RECREATE_CONFIRMED', 'TEST_CREATED', 'TEST_MESSAGE_DISPATCH_STARTED'], done: ['TEST_MESSAGE_SENT', 'TEST_MESSAGE_DISPATCH_FAILED', 'TEST_MESSAGE_PREPARED'] },
   { id: 'concluido', label: 'Concluído', start: ['TEST_MESSAGE_PREPARED'], done: ['TEST_MESSAGE_PREPARED'] },
 ]
 
@@ -71,7 +71,7 @@ export async function GET(req: NextRequest) {
   }
 
   const events = eventSet(logs)
-  const failedEvent = logs.find((log) => log.level === 'error' || /FAILED|ERROR/i.test(log.event)) || null
+  const failedEvent = logs.find((log) => log.level === 'error' || (log.level !== 'warning' && /FAILED|ERROR/i.test(log.event))) || null
   const steps = STEP_DEFS.map((def) => ({
     id: def.id,
     label: def.label,

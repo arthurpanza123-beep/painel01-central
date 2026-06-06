@@ -76,6 +76,8 @@ export function AtivarClientesPage() {
   const [recommendationError, setRecommendationError] = useState('')
   const [loadingRecommendation, setLoadingRecommendation] = useState(false)
   const [ativando, setAtivando] = useState(false)
+  const [providerConfirmed, setProviderConfirmed] = useState(false)
+  const [slotConfirmed, setSlotConfirmed] = useState(false)
   const { addToast } = useToast()
 
   useEffect(() => {
@@ -115,6 +117,8 @@ export function AtivarClientesPage() {
   async function carregarRecomendacao(nextApp = appKey, nextPanel = panelKey): Promise<Recommendation | null> {
     setRecommendation(null)
     setRecommendationError('')
+    setProviderConfirmed(false)
+    setSlotConfirmed(false)
     setRecommendationAttempted(true)
     if (!clienteSelecionado?.id) return null
     setLoadingRecommendation(true)
@@ -150,6 +154,8 @@ export function AtivarClientesPage() {
     setRecommendation(null)
     setRecommendationAttempted(false)
     setRecommendationError('')
+    setProviderConfirmed(false)
+    setSlotConfirmed(false)
     setStep('app_plano')
   }
 
@@ -159,6 +165,8 @@ export function AtivarClientesPage() {
     setRecommendation(null)
     setRecommendationAttempted(false)
     setRecommendationError('')
+    setProviderConfirmed(false)
+    setSlotConfirmed(false)
     setStep('app_plano')
   }
 
@@ -182,6 +190,14 @@ export function AtivarClientesPage() {
     }
     if (recommendation?.requires_new_account) {
       addToast('error', 'Nenhuma tela livre encontrada para este painel/app. Crie uma nova conta ou escolha outro painel.')
+      return
+    }
+    if (recommendation?.recommended && !slotConfirmed) {
+      addToast('error', 'Confirme visualmente o uso da tela livre antes de ativar')
+      return
+    }
+    if (!providerConfirmed) {
+      addToast('error', 'Confirme que voce ja liberou/renovou no painel do provedor')
       return
     }
     setAtivando(true)
@@ -301,8 +317,8 @@ export function AtivarClientesPage() {
                   </div>
                 )}
               </Panel>
-              <Picker title="Aplicativo" items={APPS} value={appKey} onChange={(value) => { setAppKey(value); carregarRecomendacao(value, panelKey) }} />
-              <Picker title="Painel gerador" items={PAINEIS.map(p => ({ ...p, color: '#60a5fa' }))} value={panelKey} onChange={(value) => { setPanelKey(value); carregarRecomendacao(appKey, value) }} />
+              <Picker title="Aplicativo" items={APPS} value={appKey} onChange={(value) => { setAppKey(value); setProviderConfirmed(false); setSlotConfirmed(false); carregarRecomendacao(value, panelKey) }} />
+              <Picker title="Painel gerador" items={PAINEIS.map(p => ({ ...p, color: '#60a5fa' }))} value={panelKey} onChange={(value) => { setPanelKey(value); setProviderConfirmed(false); setSlotConfirmed(false); carregarRecomendacao(appKey, value) }} />
               <Panel title="Catalogo do painel">
                 <div className="space-y-3">
                   <div className="flex flex-wrap gap-2">
@@ -355,7 +371,22 @@ export function AtivarClientesPage() {
                       {recommendation.recommended ? 'Tela livre encontrada' : 'Sem tela livre compativel'}
                     </p>
                     <p className="text-xs text-slate-500">{recommendation.reason}</p>
-                    {recommendation.recommended && <p className="text-xs text-emerald-300">Usar {recommendation.slot_label} em {recommendation.account_label}</p>}
+                    {recommendation.recommended && (
+                      <div className="space-y-3">
+                        <p className="text-xs text-emerald-300">Existe uma tela livre em {recommendation.account_label}: {recommendation.slot_label}.</p>
+                        <button
+                          onClick={() => setSlotConfirmed((value) => !value)}
+                          className="h-10 w-full rounded-xl text-xs font-semibold"
+                          style={{
+                            background: slotConfirmed ? 'rgba(34,197,94,0.14)' : 'rgba(245,158,11,0.1)',
+                            border: slotConfirmed ? '1px solid rgba(34,197,94,0.3)' : '1px solid rgba(245,158,11,0.24)',
+                            color: slotConfirmed ? '#4ade80' : '#fbbf24',
+                          }}
+                        >
+                          {slotConfirmed ? 'Tela livre confirmada' : 'Confirmar uso desta tela livre'}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 ) : recommendationAttempted ? (
                   <p className="text-sm text-slate-500">Nenhuma tela livre encontrada para este painel/app. Crie uma nova conta ou escolha outro painel.</p>
@@ -363,9 +394,32 @@ export function AtivarClientesPage() {
                   <p className="text-sm text-slate-500">A recomendacao sera buscada antes da ativacao.</p>
                 )}
               </Panel>
+              <Panel title="Confirmacao no provedor">
+                <div className="space-y-3">
+                  <p className="text-xs text-slate-500">Abra o painel correto, libere/renove o acesso no provedor e só depois confirme aqui para enviar a mensagem final.</p>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {providerPanelUrl && (
+                      <button onClick={() => window.open(providerPanelUrl, '_blank')} className="h-10 rounded-xl text-xs font-semibold" style={{ background: 'rgba(59,130,246,0.12)', border: '1px solid rgba(59,130,246,0.25)', color: '#60a5fa' }}>
+                        Abrir painel do provedor
+                      </button>
+                    )}
+                    <button
+                      onClick={() => setProviderConfirmed((value) => !value)}
+                      className="h-10 rounded-xl text-xs font-semibold"
+                      style={{
+                        background: providerConfirmed ? 'rgba(34,197,94,0.14)' : 'rgba(255,255,255,0.04)',
+                        border: providerConfirmed ? '1px solid rgba(34,197,94,0.3)' : '1px solid var(--border)',
+                        color: providerConfirmed ? '#4ade80' : '#cbd5e1',
+                      }}
+                    >
+                      {providerConfirmed ? 'Liberacao confirmada' : 'Ja liberei/renovei no painel'}
+                    </button>
+                  </div>
+                </div>
+              </Panel>
               <div className="grid gap-2 sm:grid-cols-2">
-                <button disabled={ativando || loadingRecommendation || Boolean(recommendationError) || Boolean(recommendation?.requires_new_account) || (clienteSelecionado?.id ? !recommendation : false)} onClick={ativarCliente} className="h-12 rounded-xl text-sm font-semibold text-white disabled:opacity-60" style={{ background: '#22c55e' }}>
-                  {ativando ? 'Ativando...' : 'Confirmar ativacao real'}
+                <button disabled={ativando || loadingRecommendation || Boolean(recommendationError) || Boolean(recommendation?.requires_new_account) || (clienteSelecionado?.id ? !recommendation : false) || Boolean(recommendation?.recommended && !slotConfirmed) || !providerConfirmed} onClick={ativarCliente} className="h-12 rounded-xl text-sm font-semibold text-white disabled:opacity-60" style={{ background: '#22c55e' }}>
+                  {ativando ? 'Ativando...' : 'Confirmar e enviar mensagem final'}
                 </button>
                 <button onClick={() => setStep('app_plano')} className="h-12 rounded-xl text-sm font-medium text-slate-400" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>Voltar</button>
               </div>

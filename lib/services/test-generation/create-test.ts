@@ -1,5 +1,6 @@
 import { maskDeviceKey, maskPassword, maskPhone, maskSensitiveText, maskUrl, maskUsername } from '@/lib/services/masking'
 import { isoPlusMinutes } from '@/lib/services/operational-window'
+import { readOperationalSettings } from '@/lib/services/operational-settings'
 import { getSupabaseServerClient } from '@/lib/supabase/server'
 import { runXcloudWorker } from '@/lib/services/xcloud-worker'
 
@@ -29,6 +30,7 @@ export type CreateTestInput = {
 
 type AppRow = { id: string; key: string; name: string; status: string | null }
 type PanelRow = { id: string; key: string; name: string; supported_app_keys: string[] | null; status: string | null }
+type ExistingClientRow = { id: string; status: string | null; legacy_metadata?: JsonRecord | null }
 
 class TestCreateError extends Error {
   status: number
@@ -60,6 +62,7 @@ const PANEL_ALIASES: Record<string, string> = {
 }
 
 const YELLOW_SUPPORTED_APPS = new Set(['xcloud', 'blessed', 'playsim', 'funplay'])
+const DEFAULT_PAINEL2_URL = 'http://127.0.0.1:3002'
 
 function db() {
   const client = getSupabaseServerClient()
@@ -94,6 +97,12 @@ function xcloudWorkerEnabled(): boolean {
   return /^(1|true|yes|on)$/i.test(String(process.env.XCLOUD_WORKER_ENABLED || ''))
 }
 
+function autoDispatchEnabled(): boolean {
+  const value = process.env.TEST_CREATED_AUTO_DISPATCH
+  if (value === undefined || value === '') return true
+  return /^(1|true|yes|on)$/i.test(value)
+}
+
 function publicCode(appKey: string, providerCode?: string): string | undefined {
   if (providerCode) return providerCode
   if (appKey === 'blessed') return '1105'
@@ -111,6 +120,115 @@ function safeMetadata(metadata: JsonRecord): JsonRecord {
     if (typeof value !== 'string') return value
     return maskSensitiveText(value)
   })) as JsonRecord
+}
+
+function painel2BaseUrl(): string {
+  return String(process.env.PAINEL2_INTERNAL_URL || process.env.NEXT_PUBLIC_PAINEL2_URL || DEFAULT_PAINEL2_URL).replace(/\/+$/, '')
+}
+
+function dispatchSummary(payload: JsonRecord | null, idempotencyKey: string): JsonRecord {
+  const ok = Boolean(payload?.ok)
+  const dryRun = Boolean(payload?.dryRun)
+  return {
+    status: ok ? (dryRun ? 'dry_run' : 'sent') : 'failed',
+    ok,
+    dry_run: dryRun,
+    code: typeof payload?.code === 'string' ? payload.code : null,
+    message: typeof payload?.message === 'string' ? maskSensitiveText(payload.message).slice(0, 300) : null,
+    already_sent: Boolean(payload?.already_sent),
+    idempotency_key: idempotencyKey,
+    updated_at: new Date().toISOString(),
+  }
+}
+
+async function patchTestLegacyMetadata(testId: string, patch: JsonRecord) {
+  const database = db()
+  const { data, error } = await database
+    .from('tests')
+    .select('legacy_metadata')
+    .eq('id', testId)
+    .maybeSingle()
+  if (error) throw new TestCreateError(500, 'TEST_METADATA_LOOKUP_FAILED', error.message)
+  const current = ((data as { legacy_metadata?: JsonRecord } | null)?.legacy_metadata || {}) as JsonRecord
+  const { error: updateError } = await database
+    .from('tests')
+    .update({ legacy_metadata: { ...current, ...patch } })
+    .eq('id', testId)
+  if (updateError) throw new TestCreateError(500, 'TEST_METADATA_UPDATE_FAILED', updateError.message)
+}
+
+async function dispatchTestCreated(input: {
+  testId: string
+  clientId: string
+  clientName: string
+  phone: string
+  appName: string
+  panelName: string
+  pedido?: string | null
+  host?: string | null
+  username: string
+  password: string
+  providerCode?: string | null
+  expiresAt: string
+  operatorRef?: string | null
+}): Promise<JsonRecord> {
+  const idempotencyKey = `test_created:${input.testId}`
+  if (!autoDispatchEnabled()) {
+    return {
+      status: 'skipped',
+      ok: false,
+      dry_run: false,
+      code: 'AUTO_DISPATCH_DISABLED',
+      message: 'Disparo automatico de teste desativado.',
+      idempotency_key: idempotencyKey,
+      updated_at: new Date().toISOString(),
+    }
+  }
+
+  const response = await fetch(`${painel2BaseUrl()}/api/flows/dispatch`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      flow: 'test_created',
+      phone: input.phone,
+      idempotency_key: idempotencyKey,
+      client: { name: input.clientName, phone: input.phone },
+      test: {
+        id: input.testId,
+        client_id: input.clientId,
+        app: input.appName,
+        panel: input.panelName,
+        pedido: input.pedido || '',
+        order_id: input.pedido || '',
+        host: input.host || '',
+        username: input.username,
+        password: input.password,
+        code: input.providerCode || '',
+        codigo: input.providerCode || '',
+        expires_at: input.expiresAt,
+      },
+      context: {
+        source: 'painel1_auto_test_created',
+        operator_ref: input.operatorRef || 'painel_web_wizard',
+        test_id: input.testId,
+        client_id: input.clientId,
+        idempotency_key: idempotencyKey,
+      },
+    }),
+  })
+  const payload = await response.json().catch(() => null) as JsonRecord | null
+  if (!response.ok && !payload) {
+    return {
+      status: 'failed',
+      ok: false,
+      dry_run: false,
+      code: `HTTP_${response.status}`,
+      message: 'Painel 2 retornou resposta invalida.',
+      idempotency_key: idempotencyKey,
+      updated_at: new Date().toISOString(),
+    }
+  }
+  return dispatchSummary(payload, idempotencyKey)
 }
 
 async function writeLog(event: string, level: 'info' | 'warning' | 'error' | 'success', payload: {
@@ -153,6 +271,206 @@ async function createPipelineEvent(payload: {
     payload: safeMetadata(payload.payload),
   })
   if (error) throw new TestCreateError(500, 'PIPELINE_EVENT_FAILED', error.message)
+}
+
+async function findExistingClientByPhone(phoneE164: string): Promise<ExistingClientRow | null> {
+  const database = db()
+  const { data, error } = await database
+    .from('clients')
+    .select('id,status,legacy_metadata')
+    .eq('phone_e164', phoneE164)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (error) throw new TestCreateError(500, 'CLIENT_LOOKUP_FAILED', error.message)
+  return data as ExistingClientRow | null
+}
+
+async function guardExistingXcloudGeneration(input: {
+  clientId: string
+  appId: string
+  operatorRef?: string | null
+}) {
+  const database = db()
+  const { data, error } = await database
+    .from('tests')
+    .select('id,status,created_at,legacy_metadata')
+    .eq('client_id', input.clientId)
+    .eq('app_id', input.appId)
+    .in('status', ['active', 'pending', 'generating'])
+    .order('created_at', { ascending: false })
+    .limit(10)
+  if (error) throw new TestCreateError(500, 'ACTIVE_TEST_LOOKUP_FAILED', error.message)
+
+  const now = new Date().toISOString()
+  for (const row of (data || []) as Array<{ id: string; status: string | null; created_at: string | null; legacy_metadata: JsonRecord | null }>) {
+    const metadata = row.legacy_metadata || {}
+    const worker = metadata.xcloud_worker && typeof metadata.xcloud_worker === 'object' && !Array.isArray(metadata.xcloud_worker)
+      ? metadata.xcloud_worker as JsonRecord
+      : {}
+    const workerStatus = String(worker.status || '').toLowerCase()
+    const dispatch = metadata.dispatch && typeof metadata.dispatch === 'object' && !Array.isArray(metadata.dispatch)
+      ? metadata.dispatch as JsonRecord
+      : {}
+    const dispatchStatus = String(dispatch.status || '').toLowerCase()
+
+    if (workerStatus === 'failed') {
+      await database.from('tests').update({
+        status: 'failed',
+        failed_at: now,
+        legacy_metadata: {
+          ...metadata,
+          failed_closed_by_retry_at: now,
+          failed_closed_by_retry_reason: 'xcloud_retry_after_failed_worker',
+        },
+      }).eq('id', row.id).then(({ error: updateError }) => {
+        if (updateError) throw new TestCreateError(500, 'FAILED_TEST_CLOSE_FAILED', updateError.message)
+      })
+      continue
+    }
+
+    const running = workerStatus === 'running' || (!workerStatus && dispatchStatus !== 'sent')
+    await writeLog('XCLOUD_DUPLICATE_GENERATION_BLOCKED', 'warning', {
+      client_id: input.clientId,
+      test_id: row.id,
+      message: running
+        ? 'Geracao XCloud duplicada bloqueada antes de chamar o provider.'
+        : 'Teste XCloud ativo ja existente bloqueou nova geracao antes do provider.',
+      metadata: { worker_status: workerStatus || null, dispatch_status: dispatchStatus || null, operator_ref: input.operatorRef || null },
+    })
+    throw new TestCreateError(
+      409,
+      running ? 'XCLOUD_TEST_ALREADY_RUNNING' : 'ACTIVE_XCLOUD_TEST_EXISTS',
+      running
+        ? 'Ja existe uma geracao XCloud em andamento para este cliente. Aguarde concluir antes de tentar novamente.'
+        : 'Ja existe um teste XCloud ativo para este cliente. Expire ou converta o teste atual antes de gerar outro.',
+    )
+  }
+}
+
+async function cancelSupersededXcloudTests(input: {
+  clientId: string
+  appId: string
+  newTestId: string
+  deviceKey: string
+}): Promise<number> {
+  const deviceKey = input.deviceKey.trim().toLowerCase()
+  if (!deviceKey) return 0
+  const database = db()
+  const { data, error } = await database
+    .from('tests')
+    .select('id,device_key,legacy_metadata')
+    .eq('client_id', input.clientId)
+    .eq('app_id', input.appId)
+    .neq('id', input.newTestId)
+    .in('status', ['active', 'pending', 'generating'])
+  if (error) throw new TestCreateError(500, 'SUPERSEDED_TEST_LOOKUP_FAILED', error.message)
+
+  const now = new Date().toISOString()
+  const matches = (data || []) as Array<{ id: string; device_key: string | null; legacy_metadata: JsonRecord | null }>
+
+  for (const row of matches) {
+    const sameDevice = String(row.device_key || '').trim().toLowerCase() === deviceKey
+    const { error: updateError } = await database
+      .from('tests')
+      .update({
+        status: 'cancelled',
+        legacy_metadata: {
+          ...(row.legacy_metadata || {}),
+          superseded_by_test_id: input.newTestId,
+          superseded_at: now,
+          superseded_reason: sameDevice ? 'xcloud_retry_same_device' : 'xcloud_retry_same_client',
+        },
+      })
+      .eq('id', row.id)
+    if (updateError) throw new TestCreateError(500, 'SUPERSEDED_TEST_UPDATE_FAILED', updateError.message)
+  }
+
+  return matches.length
+}
+
+async function getCurrentTestState(testId: string): Promise<{ status: string | null; legacy_metadata: JsonRecord }> {
+  const database = db()
+  const { data, error } = await database
+    .from('tests')
+    .select('status,legacy_metadata')
+    .eq('id', testId)
+    .maybeSingle()
+  if (error) throw new TestCreateError(500, 'TEST_STATE_LOOKUP_FAILED', error.message)
+  const row = data as { status: string | null; legacy_metadata: JsonRecord | null } | null
+  return { status: row?.status || null, legacy_metadata: row?.legacy_metadata || {} }
+}
+
+async function assertTestStillCurrent(testId: string) {
+  const current = await getCurrentTestState(testId)
+  if (current.status !== 'active' || current.legacy_metadata.superseded_by_test_id) {
+    throw new TestCreateError(409, 'TEST_SUPERSEDED', 'Esta tentativa foi substituida por uma geracao mais recente. Nenhuma mensagem foi enviada.')
+  }
+}
+
+async function markXcloudGenerationFailed(input: {
+  testId: string
+  clientId: string
+  worker: JsonRecord
+}) {
+  const database = db()
+  const now = new Date().toISOString()
+  const current = await getCurrentTestState(input.testId)
+  if (current.status !== 'active' || current.legacy_metadata.superseded_by_test_id) return
+
+  const { error: updateTestError } = await database
+    .from('tests')
+    .update({
+      status: 'failed',
+      failed_at: now,
+      legacy_metadata: {
+        ...current.legacy_metadata,
+        xcloud_worker: {
+          ...((current.legacy_metadata.xcloud_worker && typeof current.legacy_metadata.xcloud_worker === 'object' && !Array.isArray(current.legacy_metadata.xcloud_worker)) ? current.legacy_metadata.xcloud_worker as JsonRecord : {}),
+          ...input.worker,
+          status: 'failed',
+          updated_at: now,
+        },
+        dispatch: {
+          status: 'skipped',
+          ok: false,
+          code: 'XCLOUD_WORKER_FAILED',
+          message: 'Mensagem nao enviada porque o XCloud nao confirmou ativacao da device.',
+          updated_at: now,
+        },
+      },
+    })
+    .eq('id', input.testId)
+  if (updateTestError) throw new TestCreateError(500, 'TEST_FAIL_UPDATE_FAILED', updateTestError.message)
+
+  const { count } = await database
+    .from('tests')
+    .select('id', { count: 'exact', head: true })
+    .eq('client_id', input.clientId)
+    .neq('id', input.testId)
+    .in('status', ['active', 'pending', 'generating'])
+
+  if (!count) {
+    const { data: clientData } = await database
+      .from('clients')
+      .select('legacy_metadata')
+      .eq('id', input.clientId)
+      .maybeSingle()
+    const clientMetadata = ((clientData as { legacy_metadata?: JsonRecord } | null)?.legacy_metadata || {}) as JsonRecord
+    await database
+      .from('clients')
+      .update({
+        status: 'lead',
+        legacy_metadata: {
+          ...clientMetadata,
+          latest_failed_test_id: input.testId,
+          latest_xcloud_failure_at: now,
+        },
+      })
+      .eq('id', input.clientId)
+      .eq('status', 'test_active')
+      .then(() => null)
+  }
 }
 
 async function resolveApp(appId: string | undefined, appKeyInput: string | undefined): Promise<AppRow> {
@@ -273,6 +591,16 @@ export async function createGeneratedTest(input: CreateTestInput) {
       throw new TestCreateError(400, 'DEVICE_KEY_REQUIRED', 'device_key e obrigatoria para XCloud.')
     }
 
+    const database = db()
+    const existingClient = await findExistingClientByPhone(phoneE164)
+    if (app.key === 'xcloud' && existingClient?.id) {
+      await guardExistingXcloudGeneration({
+        clientId: existingClient.id,
+        appId: app.id,
+        operatorRef,
+      })
+    }
+
     await writeLog('TEST_PROVIDER_SELECTED', 'info', {
       message: `Provider selecionado: ${panel.name}.`,
       metadata: { app_key: app.key, panel_key: panel.key, provider: providerName(panel.key), operator_ref: operatorRef },
@@ -301,16 +629,10 @@ export async function createGeneratedTest(input: CreateTestInput) {
     })
 
     const now = new Date().toISOString()
-    const expiresAt = isoPlusMinutes(75, new Date(now))
-    const database = db()
-    const existing = await database
-      .from('clients')
-      .select('id,status,legacy_metadata')
-      .eq('phone_e164', phoneE164)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle()
-    if (existing.error) throw new TestCreateError(500, 'CLIENT_LOOKUP_FAILED', existing.error.message)
+    const operationalSettings = await readOperationalSettings()
+    const durationMinutes = operationalSettings.test_duration_minutes
+    const expiresAt = isoPlusMinutes(durationMinutes, new Date(now))
+    const existing = existingClient
 
     const clientPayload = {
       name: clientName,
@@ -319,7 +641,7 @@ export async function createGeneratedTest(input: CreateTestInput) {
       status: 'test_active',
       source: testMode === 'real' ? 'test_generation_real' : 'test_generation_mock',
       legacy_metadata: {
-        ...((existing.data as { legacy_metadata?: JsonRecord } | null)?.legacy_metadata || {}),
+        ...(existing?.legacy_metadata || {}),
         app_key: app.key,
         panel_key: panel.key,
         latest_test_started_at: startedAt,
@@ -328,8 +650,8 @@ export async function createGeneratedTest(input: CreateTestInput) {
       updated_at: now,
     }
 
-    const clientResult = existing.data
-      ? await database.from('clients').update(clientPayload).eq('id', (existing.data as { id: string }).id).select('id,name,status').single()
+    const clientResult = existing
+      ? await database.from('clients').update(clientPayload).eq('id', existing.id).select('id,name,status').single()
       : await database.from('clients').insert({ ...clientPayload, created_at: now }).select('id,name,status').single()
     if (clientResult.error) throw new TestCreateError(500, 'CLIENT_SAVE_FAILED', clientResult.error.message)
     const client = clientResult.data as { id: string; name: string; status: string }
@@ -356,6 +678,8 @@ export async function createGeneratedTest(input: CreateTestInput) {
         username: providerResult.username,
         password: providerResult.password,
         provider_code: providerCode || null,
+        duration_minutes: durationMinutes,
+        game_mode_enabled: operationalSettings.game_mode_enabled,
         test_does_not_consume_slot: true,
         no_account_created: true,
         no_account_slot_created: true,
@@ -383,6 +707,8 @@ export async function createGeneratedTest(input: CreateTestInput) {
         panel_id: panel.id,
         provider: providerName(panel.key),
         order_id: providerResult.order_id || null,
+        duration_minutes: durationMinutes,
+        game_mode_enabled: operationalSettings.game_mode_enabled,
         test_does_not_consume_slot: true,
       },
     })
@@ -391,13 +717,54 @@ export async function createGeneratedTest(input: CreateTestInput) {
       client_id: client.id,
       test_id: test.id,
       message: `Teste criado para ${clientName} | app=${app.key} panel=${panel.key}.`,
-      metadata: { order_id: providerResult.order_id || null, expires_at: expiresAt, operator_ref: operatorRef },
+      metadata: { order_id: providerResult.order_id || null, expires_at: expiresAt, duration_minutes: durationMinutes, game_mode_enabled: operationalSettings.game_mode_enabled, operator_ref: operatorRef },
     })
+
+    if (app.key === 'xcloud' && deviceKey) {
+      try {
+        const supersededCount = await cancelSupersededXcloudTests({
+          clientId: client.id,
+          appId: app.id,
+          newTestId: test.id,
+          deviceKey,
+        })
+        if (supersededCount > 0) {
+          await writeLog('TEST_SUPERSEDED_PREVIOUS_XCLOUD', 'warning', {
+            client_id: client.id,
+            test_id: test.id,
+            message: `${supersededCount} teste(s) XCloud anterior(es) substituido(s) para o mesmo cliente/app.`,
+            metadata: { superseded_count: supersededCount, device_key: maskDeviceKey(deviceKey), operator_ref: operatorRef },
+          })
+        }
+      } catch (supersedeError) {
+        await writeLog('TEST_SUPERSEDE_PREVIOUS_XCLOUD_FAILED', 'warning', {
+          client_id: client.id,
+          test_id: test.id,
+          message: supersedeError instanceof Error ? supersedeError.message : 'Falha ao substituir testes XCloud anteriores.',
+          metadata: { device_key: maskDeviceKey(deviceKey), operator_ref: operatorRef },
+        }).catch(() => undefined)
+      }
+    }
 
     let xcloudWorker: Awaited<ReturnType<typeof runXcloudWorker>> | null = null
     if (app.key === 'xcloud' && deviceKey && xcloudWorkerEnabled()) {
       try {
         xcloudWorker = await runXcloudWorker({ test_id: test.id, operator_ref: operatorRef || 'painel_web_wizard' })
+        await assertTestStillCurrent(test.id)
+        if (xcloudWorker.status === 'failed') {
+          await markXcloudGenerationFailed({
+            testId: test.id,
+            clientId: client.id,
+            worker: xcloudWorker as unknown as JsonRecord,
+          })
+          await writeLog('XCLOUD_WORKER_AUTORUN_FAILED', 'error', {
+            client_id: client.id,
+            test_id: test.id,
+            message: xcloudWorker.message || 'Worker XCloud retornou falha.',
+            metadata: { app_key: app.key, device_key: maskDeviceKey(deviceKey), operator_ref: operatorRef, xcloud_worker: xcloudWorker as unknown as JsonRecord },
+          })
+          throw new TestCreateError(502, 'XCLOUD_WORKER_FAILED', `XCloud nao confirmou a ativacao da device: ${xcloudWorker.message || xcloudWorker.stage}`)
+        }
       } catch (workerError) {
         await writeLog('XCLOUD_WORKER_AUTORUN_FAILED', 'error', {
           client_id: client.id,
@@ -408,12 +775,65 @@ export async function createGeneratedTest(input: CreateTestInput) {
         throw workerError
       }
     }
+    if (app.key === 'xcloud') {
+      await assertTestStillCurrent(test.id)
+    }
+
+    await writeLog('TEST_MESSAGE_DISPATCH_STARTED', 'info', {
+      client_id: client.id,
+      test_id: test.id,
+      message: 'Disparo da mensagem de teste iniciado.',
+      metadata: { flow: 'test_created', app_key: app.key, operator_ref: operatorRef },
+    })
+
+    let dispatch: JsonRecord
+    try {
+      dispatch = await dispatchTestCreated({
+        testId: test.id,
+        clientId: client.id,
+        clientName,
+        phone: phoneRaw,
+        appName: app.name,
+        panelName: panel.name,
+        pedido: providerResult.order_id || null,
+        host: providerResult.host || null,
+        username: providerResult.username,
+        password: providerResult.password,
+        providerCode: providerCode || null,
+        expiresAt,
+        operatorRef,
+      })
+      await patchTestLegacyMetadata(test.id, { dispatch })
+      await writeLog(dispatch.status === 'failed' ? 'TEST_MESSAGE_DISPATCH_FAILED' : 'TEST_MESSAGE_SENT', dispatch.status === 'failed' ? 'warning' : 'success', {
+        client_id: client.id,
+        test_id: test.id,
+        message: dispatch.status === 'failed' ? 'Mensagem de teste nao foi enviada pelo Painel 2.' : 'Mensagem de teste processada pelo Painel 2.',
+        metadata: { flow: 'test_created', dispatch, operator_ref: operatorRef },
+      })
+    } catch (dispatchError) {
+      dispatch = {
+        status: 'failed',
+        ok: false,
+        dry_run: false,
+        code: 'DISPATCH_EXCEPTION',
+        message: dispatchError instanceof Error ? maskSensitiveText(dispatchError.message).slice(0, 300) : 'Falha ao disparar mensagem.',
+        idempotency_key: `test_created:${test.id}`,
+        updated_at: new Date().toISOString(),
+      }
+      await patchTestLegacyMetadata(test.id, { dispatch }).catch(() => undefined)
+      await writeLog('TEST_MESSAGE_DISPATCH_FAILED', 'warning', {
+        client_id: client.id,
+        test_id: test.id,
+        message: String(dispatch.message || 'Falha ao disparar mensagem.'),
+        metadata: { flow: 'test_created', dispatch, operator_ref: operatorRef },
+      })
+    }
 
     await writeLog('TEST_MESSAGE_PREPARED', 'success', {
       client_id: client.id,
       test_id: test.id,
-      message: 'Mensagem de teste preparada.',
-      metadata: { flow: 'test_created', app_key: app.key, operator_ref: operatorRef },
+      message: dispatch.status === 'failed' ? 'Mensagem preparada para reenvio manual.' : 'Mensagem de teste enviada/preparada.',
+      metadata: { flow: 'test_created', app_key: app.key, dispatch_status: dispatch.status, operator_ref: operatorRef },
     })
 
     return {
@@ -440,9 +860,12 @@ export async function createGeneratedTest(input: CreateTestInput) {
         dns: providerResult.dns || null,
         expires_at: expiresAt,
         validade: expiresAt,
+        duration_minutes: durationMinutes,
+        game_mode_enabled: operationalSettings.game_mode_enabled,
         device_key: app.key === 'xcloud' && deviceKey ? maskDeviceKey(deviceKey) : null,
         xcloud_worker_status: app.key === 'xcloud' ? xcloudWorker?.status || (xcloudWorkerEnabled() ? 'running' : 'not_started') : null,
         xcloud_worker: xcloudWorker,
+        dispatch,
         mensagem: publicTestMessage({
           clientName,
           appName: app.name,

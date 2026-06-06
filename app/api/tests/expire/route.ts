@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 
 import { getProviderPanelUrl } from '@/lib/config/provider-catalog'
 import { maskSensitiveText } from '@/lib/services/masking'
+import { effectiveTestExpiresAt, readOperationalSettings } from '@/lib/services/operational-settings'
 import { getSupabaseServerClient } from '@/lib/supabase/server'
 import { runXcloudWorker } from '@/lib/services/xcloud-worker'
 
@@ -227,7 +228,14 @@ export async function POST(req: NextRequest) {
   const providerUrl = panelUrl(panel?.key || panel?.name || account?.provider || '')
   const idempotencyKey = `test_expired:${test.id}`
   const operatorRef = body.operator_ref || (body.source === 'auto' ? 'painel_web_expire_due' : 'painel_web')
-  const expiredAt = test.expires_at || new Date(new Date(test.activated_at || test.created_at || Date.now()).getTime() + 75 * 60 * 1000).toISOString()
+  const operationalSettings = await readOperationalSettings()
+  const expiredAt = effectiveTestExpiresAt({
+    activated_at: test.activated_at,
+    requested_at: null,
+    created_at: test.created_at,
+    expires_at: test.expires_at,
+    legacy_metadata: metadata,
+  }, operationalSettings).expiresAt
 
   await writeTestLog(db, 'TEST_EXPIRE_REQUESTED', 'info', {
     client_id: test.client_id,

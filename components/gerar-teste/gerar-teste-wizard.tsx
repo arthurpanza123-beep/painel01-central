@@ -52,6 +52,14 @@ interface TesteGerado {
     screenshot_path?: string | null
     message?: string
   }
+  dispatch?: {
+    status?: string
+    ok?: boolean
+    dry_run?: boolean
+    code?: string | null
+    message?: string | null
+    idempotency_key?: string
+  }
   /** Indica de onde vieram os dados: gravou no Supabase ou apenas mock local */
   source: 'supabase' | 'mock'
 }
@@ -395,6 +403,7 @@ export function GerarTesteWizard() {
           mensagem: data.test.mensagem,
           deviceKey: data.test.device_key || undefined,
           xcloudWorker,
+          dispatch: data.test.dispatch || undefined,
           source:   data.source,
         }
       } catch (err) {
@@ -505,6 +514,11 @@ export function GerarTesteWizard() {
 
   const handleConcluir = async () => {
     if (!teste?.id) return
+    if (teste.dispatch?.ok && teste.dispatch.status !== 'failed') {
+      addToast('success', teste.dispatch.dry_run ? 'Mensagem preparada no Painel 2' : 'Mensagem de teste já enviada')
+      handleNovoTeste()
+      return
+    }
     try {
       const res = await fetch('/api/flows/dispatch', {
         method: 'POST',
@@ -512,6 +526,7 @@ export function GerarTesteWizard() {
         body: JSON.stringify({
           flow: 'test_created',
           phone: form.telefone,
+          idempotency_key: teste.dispatch?.idempotency_key || `test_created:${teste.id}`,
           client: { name: form.nome, phone: form.telefone },
           test: {
             id: teste.id,
@@ -541,7 +556,7 @@ export function GerarTesteWizard() {
 
   const handleAtivarCliente = () => {
     if (!teste?.id) return
-    window.dispatchEvent(new CustomEvent('centralplay:navigate', { detail: { page: 'contas', test_id: teste.id } }))
+    window.dispatchEvent(new CustomEvent('centralplay:navigate', { detail: { page: 'ativar-clientes', test_id: teste.id } }))
     addToast('success', 'Abrindo ativação do cliente')
   }
 
@@ -1578,6 +1593,15 @@ function TelaSucesso({
                 <p className="mt-3 text-xs text-slate-500">{teste.xcloudWorker.message}</p>
               )}
             </motion.div>
+          )}
+
+          {teste.dispatch && (
+            <div className="mb-5 rounded-xl p-3" style={{ background: teste.dispatch.status === 'failed' ? 'rgba(239,68,68,0.06)' : 'rgba(34,197,94,0.06)', border: `1px solid ${teste.dispatch.status === 'failed' ? 'rgba(239,68,68,0.16)' : 'rgba(34,197,94,0.16)'}` }}>
+              <p className="text-xs font-semibold" style={{ color: teste.dispatch.status === 'failed' ? '#fca5a5' : '#86efac' }}>
+                {teste.dispatch.status === 'failed' ? 'Mensagem não enviada' : teste.dispatch.dry_run ? 'Mensagem preparada' : 'Mensagem enviada ao cliente'}
+              </p>
+              {teste.dispatch.message && <p className="mt-1 text-[11px] text-slate-500">{teste.dispatch.message}</p>}
+            </div>
           )}
 
           <motion.div

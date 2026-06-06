@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 import { getSupabaseServerClient } from '@/lib/supabase/server'
+import { effectiveTestExpiresAt, readOperationalSettings } from '@/lib/services/operational-settings'
 
 type JsonRecord = Record<string, unknown>
 
@@ -17,10 +18,14 @@ function isOperatorNoticeSent(metadata: JsonRecord): boolean {
   return Boolean(metadataString(metadata, 'operator_expired_notice_sent_at')) || metadataString(metadata, 'operator_expired_notice_status') === 'sent'
 }
 
-function isDue(row: { activated_at: string | null; created_at: string | null; expires_at: string | null }, nowMs: number) {
-  const base = row.activated_at || row.created_at
-  const dueAt = row.expires_at || (base ? new Date(new Date(base).getTime() + 75 * 60 * 1000).toISOString() : '')
-  const dueMs = new Date(dueAt).getTime()
+function isDue(row: {
+  activated_at: string | null
+  requested_at: string | null
+  created_at: string | null
+  expires_at: string | null
+  legacy_metadata?: JsonRecord | null
+}, nowMs: number, settings: Awaited<ReturnType<typeof readOperationalSettings>>) {
+  const dueMs = new Date(effectiveTestExpiresAt(row, settings).expiresAt).getTime()
   return Number.isFinite(dueMs) && dueMs <= nowMs
 }
 
@@ -38,21 +43,21 @@ export async function POST(req: NextRequest) {
   if (!db) return NextResponse.json({ ok: false, code: 'SUPABASE_NOT_CONFIGURED', message: 'Supabase server env ausente.' }, { status: 500 })
 
   const limit = Math.max(1, Math.min(Number(body?.limit || 20), 50))
-  const cutoff = new Date(Date.now() - 75 * 60 * 1000).toISOString()
+  const settings = await readOperationalSettings()
   const { data, error } = await db
     .from('tests')
-    .select('id,status,activated_at,created_at,expires_at,legacy_metadata')
+    .select('id,status,activated_at,requested_at,created_at,expires_at,legacy_metadata')
     .eq('status', 'active')
-    .or(`activated_at.lte.${cutoff},created_at.lte.${cutoff},expires_at.lte.${new Date().toISOString()}`)
     .order('created_at', { ascending: true })
-    .limit(limit)
+    .limit(Math.max(limit, 100))
 
   if (error) return NextResponse.json({ ok: false, code: 'TEST_LOOKUP_FAILED', message: error.message }, { status: 500 })
 
   const nowMs = Date.now()
   const candidates = (data || [])
-    .filter((row) => isDue(row as { activated_at: string | null; created_at: string | null; expires_at: string | null }, nowMs))
+    .filter((row) => isDue(row as { activated_at: string | null; requested_at: string | null; created_at: string | null; expires_at: string | null; legacy_metadata?: JsonRecord | null }, nowMs, settings))
     .filter((row) => !isOperatorNoticeSent(safeMetadata((row as { legacy_metadata?: JsonRecord | null }).legacy_metadata)))
+    .slice(0, limit)
 
   if (body?.dryRun) {
     return NextResponse.json({

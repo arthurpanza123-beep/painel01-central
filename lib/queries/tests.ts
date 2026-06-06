@@ -3,6 +3,7 @@ import crypto from 'crypto'
 import { MOCK_TESTES, type StatusTeste, type Teste } from '@/lib/mock-data'
 import { formatDateBR } from '@/lib/services/date-normalizer'
 import { maskDeviceKey, maskPassword, maskPhone, maskUrl, maskUsername } from '@/lib/services/masking'
+import { effectiveTestExpiresAt, readOperationalSettings } from '@/lib/services/operational-settings'
 import { isOperationalNoise, operationWindows } from '@/lib/services/operational-window'
 import { getSupabaseServerClient, isSupabaseServerConfigured } from '@/lib/supabase/server'
 
@@ -69,7 +70,8 @@ export async function getTestsData(): Promise<TestsQueryResult> {
 
   try {
     const { todayStartIso } = operationWindows()
-    const [testsRes, clientsRes, accountsRes, appsRes, panelsRes] = await Promise.all([
+    const [settings, testsRes, clientsRes, accountsRes, appsRes, panelsRes] = await Promise.all([
+      readOperationalSettings(),
       db.from('tests').select('id,client_id,app_id,panel_id,account_id,device_key,provider,provider_code,status,requested_at,activated_at,expires_at,failed_at,created_at,legacy_metadata').gte('created_at', todayStartIso).order('created_at', { ascending: false }).limit(100),
       db.from('clients').select('id,name,phone_e164'),
       db.from('accounts').select('id,username,password_secret,m3u_url_secret,hls_url_secret'),
@@ -96,7 +98,8 @@ export async function getTestsData(): Promise<TestsQueryResult> {
       const app = test.app_id ? appsById.get(test.app_id) : undefined
       const panel = test.panel_id ? panelsById.get(test.panel_id) : undefined
       const created = test.activated_at || test.requested_at || test.created_at || new Date().toISOString()
-      const expires = new Date(new Date(created).getTime() + 75 * 60 * 1000).toISOString()
+      const effective = effectiveTestExpiresAt(test, settings)
+      const expires = effective.expiresAt
       const rawCode = test.device_key || test.provider_code || test.id
       const legacy = test.legacy_metadata || {}
       const metadataUsername = typeof legacy.xtream_username === 'string' ? legacy.xtream_username : ''
@@ -117,6 +120,9 @@ export async function getTestsData(): Promise<TestsQueryResult> {
         status: mapOperationalStatus(test.status, expires),
         validade: `${formatDateBR(expires)} ${new Date(expires).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`,
         expiresAt: expires,
+        durationMinutes: effective.durationMinutes,
+        gameModeDuration: effective.source === 'current_setting' && settings.game_mode_enabled,
+        xcloudRemoved: Boolean(legacy.xcloud_worker && typeof legacy.xcloud_worker === 'object' && !Array.isArray(legacy.xcloud_worker) && (legacy.xcloud_worker as Record<string, unknown>).device_removed),
         criadoEm: formatDateBR(created),
         horario: new Date(created).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
       }

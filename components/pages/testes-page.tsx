@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   TestTube2, Search, Clock, Eye, Zap, ExternalLink,
-  AlertTriangle, Trash2, X, Loader2
+  AlertTriangle, Copy, X, Loader2
 } from 'lucide-react'
 import {
   MOCK_TESTES,
@@ -14,10 +14,8 @@ import {
 import { useToast } from '@/components/ui/toast'
 import { getProviderPanelUrl } from '@/lib/config/provider-catalog'
 
-const JANELA_TESTE_MS = 75 * 60 * 1000
-
 // ——— Countdown hook ———
-function useCountdown(validade: string) {
+function useCountdown(validade: string, durationMinutes?: number) {
   const [remaining, setRemaining] = useState('')
   const [urgente, setUrgente] = useState(false)
   const [expirado, setExpirado] = useState(false)
@@ -50,7 +48,8 @@ function useCountdown(validade: string) {
       const h = Math.floor(diff / 3600000)
       const m = Math.floor((diff % 3600000) / 60000)
       setUrgente(h < 1)
-      setPct(Math.max(0, Math.min(100, (diff / JANELA_TESTE_MS) * 100)))
+      const totalMs = Math.max(1, Number(durationMinutes || 75)) * 60 * 1000
+      setPct(Math.max(0, Math.min(100, (diff / totalMs) * 100)))
       if (h >= 24) setRemaining(`${Math.floor(h / 24)}d ${h % 24}h`)
       else if (h > 0) setRemaining(`${h}h ${m}m`)
       else setRemaining(`${m}min`)
@@ -58,7 +57,7 @@ function useCountdown(validade: string) {
     calc()
     const id = setInterval(calc, 30000)
     return () => clearInterval(id)
-  }, [validade])
+  }, [validade, durationMinutes])
 
   return { remaining, urgente, expirado, pct }
 }
@@ -73,18 +72,18 @@ const STATUS: Record<StatusTeste, { label: string; color: string }> = {
 
 // ——— Card de teste focado em countdown ———
 function TesteCard({
-  teste, onVerDetalhes, onAtivar, onAbrirPainel2, onExpirar, onRemoverXCloud, isExpiring, highlighted,
+  teste, onVerDetalhes, onAtivar, onAbrirPainel2, onExpirar, onCopiarUsuario, isExpiring, highlighted,
 }: {
   teste: Teste
   onVerDetalhes: () => void
   onAtivar: () => void
   onAbrirPainel2: () => void
   onExpirar: () => void
-  onRemoverXCloud: () => void
+  onCopiarUsuario: () => void
   isExpiring?: boolean
   highlighted?: boolean
 }) {
-  const { remaining, urgente, expirado, pct } = useCountdown(teste.expiresAt || teste.validade)
+  const { remaining, urgente, expirado, pct } = useCountdown(teste.expiresAt || teste.validade, teste.durationMinutes)
   const cfg = STATUS[teste.status]
   const isAtivo = teste.status === 'ativo'
   const isExpirado = teste.status === 'expirado' || expirado
@@ -169,6 +168,16 @@ function TesteCard({
                 XCloud
               </span>
             )}
+            {teste.durationMinutes && (
+              <span className="text-[10px] font-medium px-2 py-0.5 rounded-full shrink-0" style={{ background: 'rgba(245,158,11,0.12)', color: '#fbbf24' }}>
+                {teste.durationMinutes} min
+              </span>
+            )}
+            {isExpirado && teste.xcloudRemoved && (
+              <span className="text-[10px] font-medium px-2 py-0.5 rounded-full shrink-0" style={{ background: 'rgba(20,184,166,0.12)', color: '#2dd4bf' }}>
+                XCloud removido
+              </span>
+            )}
           </div>
           <p className="text-xs text-slate-500 mb-3">
             {teste.app} · {teste.servidor} · {teste.telefone}
@@ -195,16 +204,21 @@ function TesteCard({
                 style={{ background: 'rgba(239,68,68,0.1)', color: '#f87171', border: '1px solid rgba(239,68,68,0.2)' }}
               >
                 {isExpiring ? <Loader2 className="h-3 w-3 animate-spin" /> : <AlertTriangle className="h-3 w-3" />}
-                {isExpiring ? 'Expirando...' : 'Expirar teste'}
+                {isExpiring ? 'Expirando...' : 'Expirar e enviar figurinha'}
               </button>
             )}
-            {isExpirado && isXCloud && (
-              <button onClick={onRemoverXCloud} className="h-7 px-3 rounded-lg text-[11px] font-medium flex items-center gap-1.5 transition-all" style={{ background: 'rgba(239,68,68,0.1)', color: '#f87171', border: '1px solid rgba(239,68,68,0.2)' }}>
-                <Trash2 className="h-3 w-3" /> Remover device XCloud
+            {isExpirado && (
+              <button onClick={onAtivar} className="h-7 px-3 rounded-lg text-[11px] font-medium flex items-center gap-1.5 transition-all" style={{ background: 'rgba(34,197,94,0.1)', color: '#4ade80', border: '1px solid rgba(34,197,94,0.2)' }}>
+                <Zap className="h-3 w-3" /> Renovar / Ativar
+              </button>
+            )}
+            {isExpirado && (
+              <button onClick={onCopiarUsuario} className="h-7 px-3 rounded-lg text-[11px] font-medium flex items-center gap-1.5 transition-all" style={{ background: 'rgba(148,163,184,0.1)', color: '#cbd5e1', border: '1px solid rgba(148,163,184,0.2)' }}>
+                <Copy className="h-3 w-3" /> Copiar usuário
               </button>
             )}
             <button onClick={onAbrirPainel2} className="h-7 px-3 rounded-lg text-[11px] font-medium flex items-center gap-1.5 transition-all" style={{ background: 'rgba(59,130,246,0.1)', color: '#60a5fa', border: '1px solid rgba(59,130,246,0.2)' }}>
-              <ExternalLink className="h-3 w-3" /> Painel 2
+              <ExternalLink className="h-3 w-3" /> {isExpirado ? 'Abrir painel' : 'Painel 2'}
             </button>
           </div>
         </div>
@@ -220,10 +234,8 @@ export function TestesPage() {
   const [testes, setTestes] = useState(MOCK_TESTES)
   const [dataSource, setDataSource] = useState<'mock' | 'supabase'>('mock')
   const [modalExpirar, setModalExpirar] = useState<Teste | null>(null)
-  const [modalRemoverXCloud, setModalRemoverXCloud] = useState<Teste | null>(null)
   const [expiringTestId, setExpiringTestId] = useState<string | null>(null)
   const [blockedPanelUrl, setBlockedPanelUrl] = useState<string | null>(null)
-  const [removendoXCloud, setRemovendoXCloud] = useState(false)
   const [highlightedTestId, setHighlightedTestId] = useState<string | null>(null)
   const { addToast } = useToast()
 
@@ -335,7 +347,7 @@ export function TestesPage() {
       setModalExpirar(null)
       const alreadySent = data.already_expired || data.sticker_already_sent || data.dispatch?.already_sent
       const alreadyRunning = data.already_running || data.dispatch?.reason === 'already_running'
-      addToast('success', alreadyRunning ? 'Expiracao ja esta em andamento. Aguarde a atualizacao da lista.' : alreadySent ? 'Teste ja estava expirado. Usuario copiado e figurinha nao foi reenviada.' : 'Teste expirado. Usuario copiado e figurinha enviada.')
+      addToast('success', alreadyRunning ? 'Expiracao ja esta em andamento.' : alreadySent ? 'Usuario copiado. Figurinha ja enviada antes.' : 'Usuario copiado. Teste expirado e figurinha enviada.')
     } catch (err) {
       addToast('error', err instanceof Error ? err.message : 'Falha ao expirar teste')
     } finally {
@@ -343,24 +355,14 @@ export function TestesPage() {
     }
   }
 
-  const handleRemoverXCloud = async (teste: Teste) => {
-    setRemovendoXCloud(true)
-    try {
-      const res = await fetch('/api/xcloud/activate-device', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ test_id: teste.id, mode: 'remove_device', confirm_remove: true, operator_ref: 'painel_web' }),
-      })
-      const data = await res.json().catch(() => null)
-      if (!res.ok || !data?.success) throw new Error(data?.error || `HTTP ${res.status}`)
-      abrirPainel2(teste, 'xcloud_remove_device')
-      addToast('success', 'Remocao XCloud concluida')
-      setModalRemoverXCloud(null)
-    } catch (err) {
-      addToast('error', err instanceof Error ? err.message : 'Falha ao remover device XCloud')
-    } finally {
-      setRemovendoXCloud(false)
+  const copiarUsuario = async (teste: Teste) => {
+    const username = teste.usuario || ''
+    if (!username) {
+      addToast('error', 'Usuario indisponivel')
+      return
     }
+    await navigator.clipboard.writeText(username)
+    addToast('success', 'Copiado para a area de transferencia')
   }
 
   return (
@@ -380,7 +382,7 @@ export function TestesPage() {
           {metricas.testesExpirados > 0 && ` · ${metricas.testesExpirados} expirados`}
           {metricas.testesConvertidos > 0 && ` · ${metricas.testesConvertidos} convertidos`}
         </p>
-        <p className="text-[10px] text-slate-600 mt-1">Duracao do teste: 1 hora e 15 minutos</p>
+        <p className="text-[10px] text-slate-600 mt-1">A duração vem do próprio teste: 45 min em horário de jogo ou 1h15 no modo normal.</p>
         <p className="mt-2 inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-medium"
            style={{ background: dataSource === 'supabase' ? 'rgba(34,197,94,0.12)' : 'rgba(245,158,11,0.12)', color: dataSource === 'supabase' ? '#4ade80' : '#fbbf24' }}>
           Fonte: {dataSource === 'supabase' ? 'Supabase' : 'Mock'}
@@ -448,14 +450,14 @@ export function TestesPage() {
                 key={teste.id}
                 teste={teste}
                 onVerDetalhes={() => addToast('info', `Detalhes: ${teste.usuario} / ${teste.senha}`)}
-                onAtivar={() => window.dispatchEvent(new CustomEvent('centralplay:navigate', { detail: { page: 'ativar-clientes', test_id: teste.id } }))}
+                onAtivar={() => { window.dispatchEvent(new CustomEvent('centralplay:navigate', { detail: { page: 'ativar-clientes', test_id: teste.id } })) }}
                 onAbrirPainel2={() => abrirPainel2(teste)}
                 onExpirar={() => {
                   if (expiringTestId) return
                   setBlockedPanelUrl(null)
                   setModalExpirar(teste)
                 }}
-                onRemoverXCloud={() => setModalRemoverXCloud(teste)}
+                onCopiarUsuario={() => copiarUsuario(teste)}
                 isExpiring={expiringTestId === teste.id}
                 highlighted={highlightedTestId === teste.id}
               />
@@ -467,9 +469,9 @@ export function TestesPage() {
     <AnimatePresence>
       {modalExpirar && (
         <ConfirmModal
-          title="Expirar teste"
-          description={expiringTestId === modalExpirar.id ? `Expirando teste, copiando usuario e enviando figurinha. Aguarde.` : `Copiar usuario, abrir painel ${modalExpirar.servidor} e mandar contexto test_expired para o Painel 2.`}
-          confirmLabel={expiringTestId === modalExpirar.id ? 'Expirando...' : 'Expirar teste'}
+          title="Expirar e enviar figurinha"
+          description={expiringTestId === modalExpirar.id ? 'Expirando teste, copiando usuario, abrindo painel e enviando figurinha. Aguarde.' : 'Vou copiar o usuário, abrir o painel do provedor, marcar o teste como expirado e enviar a figurinha.'}
+          confirmLabel={expiringTestId === modalExpirar.id ? 'Expirando...' : 'Expirar e enviar figurinha'}
           danger
           disabled={expiringTestId === modalExpirar.id}
           blockedPanelUrl={blockedPanelUrl}
@@ -478,17 +480,6 @@ export function TestesPage() {
             setModalExpirar(null)
           }}
           onConfirm={() => handleExpirarTeste(modalExpirar)}
-        />
-      )}
-      {modalRemoverXCloud && (
-        <ConfirmModal
-          title="Remover device XCloud"
-          description="Executa somente localizar, desativar e excluir device. Nao recria, nao gera Yellow, nao vincula Xtream."
-          confirmLabel={removendoXCloud ? 'Removendo...' : 'Remover device'}
-          danger
-          disabled={removendoXCloud}
-          onClose={() => setModalRemoverXCloud(null)}
-          onConfirm={() => handleRemoverXCloud(modalRemoverXCloud)}
         />
       )}
     </AnimatePresence>

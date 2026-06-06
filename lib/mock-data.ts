@@ -30,6 +30,9 @@ export interface Teste {
   status: StatusTeste
   validade: string
   expiresAt?: string
+  durationMinutes?: number
+  gameModeDuration?: boolean
+  xcloudRemoved?: boolean
   criadoEm: string
   horario: string
 }
