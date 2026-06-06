@@ -276,14 +276,14 @@ function BgGlow() {
   return (
     <div className="pointer-events-none absolute inset-0 overflow-hidden" style={{ zIndex: 0 }}>
       <div
-        className="absolute rounded-full"
+        className="absolute hidden rounded-full md:block"
         style={{
           width: 600, height: 600, top: '-15%', left: '-10%',
           background: 'radial-gradient(circle, rgba(37,99,235,0.10) 0%, transparent 65%)',
         }}
       />
       <div
-        className="absolute rounded-full"
+        className="absolute hidden rounded-full md:block"
         style={{
           width: 500, height: 500, top: '20%', right: '-12%',
           background: 'radial-gradient(circle, rgba(34,197,94,0.06) 0%, transparent 65%)',

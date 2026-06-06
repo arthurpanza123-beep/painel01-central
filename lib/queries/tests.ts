@@ -12,6 +12,11 @@ export type TestsQueryResult = {
   items: Teste[]
 }
 
+export type TestsQueryOptions = {
+  testId?: string | null
+  clientId?: string | null
+}
+
 type TestRow = {
   id: string
   client_id: string
@@ -52,6 +57,15 @@ function mapOperationalStatus(status: string | null, expires: string): StatusTes
   return mapped
 }
 
+function canExpireOperationally(status: string | null): boolean {
+  return status === 'active' || status === 'generating' || status === 'pending'
+}
+
+function isDispatchSent(metadata: Record<string, unknown> | null | undefined): boolean {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return false
+  return Boolean(metadata.expired_dispatch_sent_at) || metadata.expired_dispatch_status === 'sent'
+}
+
 function buildMockItems(): Teste[] {
   return MOCK_TESTES.map((teste) => ({
     ...teste,
@@ -63,16 +77,21 @@ function buildMockItems(): Teste[] {
   }))
 }
 
-export async function getTestsData(): Promise<TestsQueryResult> {
+export async function getTestsData(options: TestsQueryOptions = {}): Promise<TestsQueryResult> {
   if (!isSupabaseServerConfigured) return { data_source: 'mock', items: buildMockItems() }
   const db = getSupabaseServerClient()
   if (!db) return { data_source: 'mock', items: buildMockItems() }
 
   try {
     const { todayStartIso } = operationWindows()
-    const [settings, testsRes, clientsRes, accountsRes, appsRes, panelsRes] = await Promise.all([
+    const testSelect = 'id,client_id,app_id,panel_id,account_id,device_key,provider,provider_code,status,requested_at,activated_at,expires_at,failed_at,created_at,legacy_metadata'
+    const targetTestId = String(options.testId || '').trim()
+    const [settings, testsRes, targetTestRes, clientsRes, accountsRes, appsRes, panelsRes] = await Promise.all([
       readOperationalSettings(),
-      db.from('tests').select('id,client_id,app_id,panel_id,account_id,device_key,provider,provider_code,status,requested_at,activated_at,expires_at,failed_at,created_at,legacy_metadata').gte('created_at', todayStartIso).order('created_at', { ascending: false }).limit(100),
+      db.from('tests').select(testSelect).gte('created_at', todayStartIso).order('created_at', { ascending: false }).limit(100),
+      targetTestId
+        ? db.from('tests').select(testSelect).eq('id', targetTestId).maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
       db.from('clients').select('id,name,phone_e164'),
       db.from('accounts').select('id,username,password_secret,m3u_url_secret,hls_url_secret'),
       db.from('apps').select('id,name,key'),
@@ -80,6 +99,7 @@ export async function getTestsData(): Promise<TestsQueryResult> {
     ])
 
     if (testsRes.error) throw new Error(testsRes.error.message)
+    if (targetTestRes.error) throw new Error(targetTestRes.error.message)
     if (clientsRes.error) throw new Error(clientsRes.error.message)
     if (accountsRes.error) throw new Error(accountsRes.error.message)
     if (appsRes.error) throw new Error(appsRes.error.message)
@@ -90,7 +110,14 @@ export async function getTestsData(): Promise<TestsQueryResult> {
     const appsById = new Map((appsRes.data as AppRow[] || []).map((row) => [row.id, row]))
     const panelsById = new Map((panelsRes.data as PanelRow[] || []).map((row) => [row.id, row]))
 
-    const items: Teste[] = (testsRes.data as TestRow[] || [])
+    const rowsById = new Map<string, TestRow>()
+    for (const row of (testsRes.data as TestRow[] || [])) rowsById.set(row.id, row)
+    if (targetTestRes.data) {
+      const target = targetTestRes.data as TestRow
+      if (!options.clientId || target.client_id === options.clientId) rowsById.set(target.id, target)
+    }
+
+    const items: Teste[] = Array.from(rowsById.values())
       .filter((test) => !isOperationalNoise(clientsById.get(test.client_id)?.name))
       .map((test) => {
       const client = clientsById.get(test.client_id)
@@ -102,10 +129,12 @@ export async function getTestsData(): Promise<TestsQueryResult> {
       const expires = effective.expiresAt
       const rawCode = test.device_key || test.provider_code || test.id
       const legacy = test.legacy_metadata || {}
-      const metadataUsername = typeof legacy.xtream_username === 'string' ? legacy.xtream_username : ''
+      const metadataUsername = typeof legacy.username === 'string' ? legacy.username : typeof legacy.xtream_username === 'string' ? legacy.xtream_username : ''
       const metadataPassword = typeof legacy.xtream_password === 'string' ? legacy.xtream_password : ''
       const metadataM3u = typeof legacy.optional_m3u_url === 'string' ? legacy.optional_m3u_url : ''
       const metadataHls = typeof legacy.optional_hls_url === 'string' ? legacy.optional_hls_url : ''
+      const rawUsername = account?.username || metadataUsername || ''
+      const canExpire = canExpireOperationally(test.status) && !isDispatchSent(legacy)
 
       return {
         id: test.id,
@@ -113,7 +142,7 @@ export async function getTestsData(): Promise<TestsQueryResult> {
         telefone: maskPhone(client?.phone_e164 || ''),
         app: app?.name || test.provider || 'Aplicativo',
         servidor: panel?.name || test.provider || 'Servidor',
-        usuario: maskUsername(account?.username || metadataUsername || 'usuario'),
+        usuario: maskUsername(rawUsername || 'usuario'),
         senha: maskPassword(account?.password_secret || metadataPassword || 'senha'),
         codigo: maskDeviceKey(rawCode) || codeFromSeed(test.id),
         m3u: account?.m3u_url_secret ? maskUrl(account.m3u_url_secret) : account?.hls_url_secret ? maskUrl(account.hls_url_secret) : metadataM3u ? maskUrl(metadataM3u) : metadataHls ? maskUrl(metadataHls) : undefined,
@@ -121,8 +150,11 @@ export async function getTestsData(): Promise<TestsQueryResult> {
         validade: `${formatDateBR(expires)} ${new Date(expires).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`,
         expiresAt: expires,
         durationMinutes: effective.durationMinutes,
-        gameModeDuration: effective.source === 'current_setting' && settings.game_mode_enabled,
+        gameModeDuration: effective.durationMinutes === 45,
         xcloudRemoved: Boolean(legacy.xcloud_worker && typeof legacy.xcloud_worker === 'object' && !Array.isArray(legacy.xcloud_worker) && (legacy.xcloud_worker as Record<string, unknown>).device_removed),
+        canExpire,
+        copyUsername: rawUsername,
+        rawStatus: test.status || '',
         criadoEm: formatDateBR(created),
         horario: new Date(created).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
       }

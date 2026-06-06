@@ -20,6 +20,7 @@ import {
   X,
   Zap,
 } from 'lucide-react'
+import { useToast } from '@/components/ui/toast'
 
 const GerarTesteWizard    = dynamic(() => import('@/components/gerar-teste/gerar-teste-wizard').then(m => ({ default: m.GerarTesteWizard })), { ssr: false })
 const TestesPage           = dynamic(() => import('@/components/pages/testes-page').then(m => ({ default: m.TestesPage })), { ssr: false })
@@ -78,8 +79,10 @@ function pageFromSection(section: string | null): NavPage | null {
 export default function App() {
   const [page, setPage] = useState<NavPage>('dashboard')
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [confirmGameModeOpen, setConfirmGameModeOpen] = useState(false)
   const [settings, setSettings] = useState<OperationalSettings>({ game_mode_enabled: false, test_duration_minutes: 75 })
   const [settingsBusy, setSettingsBusy] = useState(false)
+  const { addToast } = useToast()
 
   const navigate = (nextPage: NavPage) => {
     setPage(nextPage)
@@ -116,11 +119,9 @@ export default function App() {
     return () => { alive = false }
   }, [])
 
-  const toggleGameMode = async () => {
+  const persistGameMode = async (next: boolean) => {
     if (settingsBusy) return
-    const next = !settings.game_mode_enabled
     setSettingsBusy(true)
-    setSettings({ game_mode_enabled: next, test_duration_minutes: next ? 45 : 75 })
     try {
       const res = await fetch('/api/settings/operational', {
         method: 'POST',
@@ -131,15 +132,26 @@ export default function App() {
       if (!res.ok || !payload?.settings) throw new Error(payload?.message || `HTTP ${res.status}`)
       setSettings(payload.settings)
       window.dispatchEvent(new CustomEvent('centralplay:operational-settings-updated', { detail: payload.settings }))
+      addToast('success', next ? 'Horário de Jogo ativado: novos testes terão 45 minutos.' : 'Horário de Jogo desativado: novos testes voltam para 1h15.')
     } catch {
-      setSettings({ game_mode_enabled: !next, test_duration_minutes: !next ? 45 : 75 })
+      addToast('error', 'Nao foi possivel salvar o Horario de Jogo.')
     } finally {
       setSettingsBusy(false)
+      setConfirmGameModeOpen(false)
     }
   }
 
+  const toggleGameMode = () => {
+    if (settingsBusy) return
+    if (!settings.game_mode_enabled) {
+      setConfirmGameModeOpen(true)
+      return
+    }
+    void persistGameMode(false)
+  }
+
   return (
-    <div className="flex min-h-screen" style={{ background: 'var(--background)' }}>
+    <div className="flex min-h-screen overflow-x-hidden" style={{ background: 'var(--background)' }}>
       <Sidebar activePage={page} onNavigate={navigate} />
       <GameModeToggle settings={settings} busy={settingsBusy} onToggle={toggleGameMode} />
       <button
@@ -151,14 +163,20 @@ export default function App() {
           zIndex: 9999,
           background: 'rgba(15,23,42,0.92)',
           border: '1px solid rgba(148,163,184,0.28)',
-          boxShadow: '0 14px 34px rgba(0,0,0,0.45)',
-          backdropFilter: 'blur(12px)',
+          boxShadow: '0 8px 22px rgba(0,0,0,0.34)',
+          backdropFilter: 'blur(6px)',
         }}
         aria-label="Abrir menu"
       >
         <Menu className="h-5 w-5" />
       </button>
       <MobileNav open={mobileMenuOpen} activePage={page} onClose={() => setMobileMenuOpen(false)} onNavigate={navigate} />
+      <GameModeConfirmModal
+        open={confirmGameModeOpen}
+        busy={settingsBusy}
+        onCancel={() => setConfirmGameModeOpen(false)}
+        onConfirm={() => persistGameMode(true)}
+      />
       <main className="flex-1 min-w-0 overflow-y-auto pt-16 md:pt-0">
         {page === 'dashboard'      && <DashboardPage onNavigate={navigate} />}
         {page === 'pipeline'       && <PipelinePage />}
@@ -191,8 +209,8 @@ function GameModeToggle({ settings, busy, onToggle }: { settings: OperationalSet
         background: active ? 'rgba(245,158,11,0.18)' : 'rgba(15,23,42,0.88)',
         border: active ? '1px solid rgba(245,158,11,0.38)' : '1px solid rgba(148,163,184,0.22)',
         color: active ? '#fde68a' : '#cbd5e1',
-        boxShadow: active ? '0 0 24px rgba(245,158,11,0.2)' : '0 14px 34px rgba(0,0,0,0.32)',
-        backdropFilter: 'blur(12px)',
+        boxShadow: active ? '0 0 14px rgba(245,158,11,0.16)' : '0 8px 22px rgba(0,0,0,0.26)',
+        backdropFilter: 'blur(6px)',
       }}
       aria-pressed={active}
       title={active ? 'HORÁRIO DE JOGO: ON' : 'HORÁRIO DE JOGO: OFF'}
@@ -220,19 +238,19 @@ function MobileNav({ open, activePage, onClose, onNavigate }: {
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           className="fixed inset-0 md:hidden"
-          style={{ zIndex: 10000, background: 'rgba(3,7,18,0.72)', backdropFilter: 'blur(10px)' }}
+          style={{ zIndex: 10000, background: 'rgba(3,7,18,0.72)', backdropFilter: 'blur(4px)' }}
           onClick={onClose}
         >
           <motion.div
             initial={{ y: 24, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 24, opacity: 0 }}
-            className="absolute bottom-0 left-0 right-0 rounded-t-2xl p-4"
+            className="absolute bottom-0 left-0 right-0 max-h-[86vh] overflow-y-auto rounded-t-2xl p-4"
             style={{
               paddingBottom: 'calc(16px + env(safe-area-inset-bottom))',
               background: 'var(--background)',
               borderTop: '1px solid var(--border)',
-              boxShadow: '0 -24px 60px rgba(0,0,0,0.55)',
+              boxShadow: '0 -12px 34px rgba(0,0,0,0.44)',
             }}
             onClick={(event) => event.stopPropagation()}
           >
@@ -264,6 +282,62 @@ function MobileNav({ open, activePage, onClose, onNavigate }: {
                   </button>
                 )
               })}
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  )
+}
+
+function GameModeConfirmModal({ open, busy, onCancel, onConfirm }: {
+  open: boolean
+  busy: boolean
+  onCancel: () => void
+  onConfirm: () => void
+}) {
+  return (
+    <AnimatePresence>
+      {open && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-[10001] flex items-center justify-center p-4"
+          style={{ background: 'rgba(3,7,18,0.74)', backdropFilter: 'blur(4px)' }}
+          onClick={() => {
+            if (!busy) onCancel()
+          }}
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.96, y: 10 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.96, y: 10 }}
+            className="w-full max-w-md rounded-2xl p-5"
+            style={{ background: 'var(--card)', border: '1px solid var(--border)', boxShadow: '0 18px 50px rgba(0,0,0,0.46)' }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="mb-3 text-base font-semibold text-white">Ativar Horário de Jogo?</h2>
+            <p className="mb-5 text-sm leading-relaxed text-slate-400">
+              Com o Horário de Jogo ativo, novos testes vão durar apenas 45 minutos em vez de 1h15. Use isso somente em dia/horário de jogo para evitar teste longo demais.
+            </p>
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button
+                disabled={busy}
+                onClick={onCancel}
+                className="h-10 rounded-xl px-4 text-sm font-medium text-slate-400 disabled:cursor-not-allowed disabled:opacity-60"
+                style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)' }}
+              >
+                Cancelar
+              </button>
+              <button
+                disabled={busy}
+                onClick={onConfirm}
+                className="h-10 rounded-xl px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                style={{ background: '#f59e0b' }}
+              >
+                Ativar 45 minutos
+              </button>
             </div>
           </motion.div>
         </motion.div>

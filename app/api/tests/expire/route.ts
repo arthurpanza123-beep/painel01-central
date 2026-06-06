@@ -271,18 +271,6 @@ export async function POST(req: NextRequest) {
       metadata: { idempotency_key: idempotencyKey, expired_dispatch_sent_at: metadataString(metadata, 'expired_dispatch_sent_at') || null },
     })
 
-    const operatorNotice = await dispatchOperatorExpiredNotice(db, {
-      test,
-      metadata,
-      client,
-      app,
-      panel,
-      username,
-      expiredAt,
-      operatorRef,
-      source: body.source === 'auto' ? 'auto' : 'manual',
-    }).catch((error) => ({ ok: false, error: error instanceof Error ? error.message : String(error) }))
-
     return NextResponse.json({
       ok: true,
       success: true,
@@ -294,7 +282,32 @@ export async function POST(req: NextRequest) {
       username,
       provider_url: providerUrl,
       dispatch: { ok: true, already_sent: true, idempotency_key: idempotencyKey },
-      operator_notice: operatorNotice,
+      operator_notice: { skipped: true, reason: 'already_expired' },
+      xcloud_remove: { skipped: true, reason: 'already_expired' },
+    })
+  }
+
+  if (previousStatus === 'expired') {
+    await writeTestLog(db, 'TEST_EXPIRE_SKIPPED_ALREADY_EXPIRED', 'info', {
+      client_id: test.client_id,
+      test_id: test.id,
+      account_id: test.account_id,
+      message: 'Teste ja estava expired. Nenhum envio ou remocao sera repetido.',
+      metadata: { idempotency_key: idempotencyKey, expired_dispatch_status: metadataString(metadata, 'expired_dispatch_status') || null },
+    })
+
+    return NextResponse.json({
+      ok: true,
+      success: true,
+      code: 'TEST_ALREADY_EXPIRED',
+      already_expired: true,
+      sticker_already_sent: isDispatchSent(metadata),
+      test_id: test.id,
+      client_id: test.client_id,
+      username,
+      provider_url: providerUrl,
+      dispatch: { ok: true, already_sent: isDispatchSent(metadata), skipped: true, reason: 'already_expired', idempotency_key: idempotencyKey },
+      operator_notice: { skipped: true, reason: 'already_expired' },
       xcloud_remove: { skipped: true, reason: 'already_expired' },
     })
   }

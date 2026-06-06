@@ -99,6 +99,8 @@
   html, body {
     background-color: #0c0e14;
     color: #e2e8f0;
+    overflow-x: hidden;
+    width: 100%;
   }
   body {
     @apply bg-background text-foreground;
@@ -106,10 +108,21 @@
   }
   html {
     @apply font-sans;
+    overflow-x: hidden;
   }
   h1, h2, h3, h4, h5, h6 {
     font-family: var(--font-display);
     @apply font-semibold tracking-tight;
+  }
+}
+
+@media (max-width: 767px) {
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    overscroll-behavior-x: none;
   }
 }
 

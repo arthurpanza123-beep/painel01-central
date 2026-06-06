@@ -52,12 +52,33 @@ export function effectiveTestExpiresAt(input: {
   created_at?: string | null
   expires_at?: string | null
   legacy_metadata?: Record<string, unknown> | null
-}, settings: OperationalSettings): { expiresAt: string; durationMinutes: number; source: 'metadata' | 'current_setting' | 'stored_expires_at' } {
+}, _settings?: OperationalSettings): { expiresAt: string; durationMinutes: number; source: 'metadata' | 'stored_expires_at' | 'fallback_default' } {
   const base = input.activated_at || input.requested_at || input.created_at || new Date().toISOString()
-  const durationMinutes = settings.game_mode_enabled ? GAME_TEST_DURATION_MINUTES : NORMAL_TEST_DURATION_MINUTES
+  const parsedBaseMs = new Date(base).getTime()
+  const baseMs = Number.isFinite(parsedBaseMs) ? parsedBaseMs : Date.now()
+  const metadataDuration = metadataDurationMinutes(input.legacy_metadata)
+  if (metadataDuration) {
+    return {
+      expiresAt: new Date(baseMs + metadataDuration * 60 * 1000).toISOString(),
+      durationMinutes: metadataDuration,
+      source: 'metadata',
+    }
+  }
+
+  const storedMs = input.expires_at ? new Date(input.expires_at).getTime() : NaN
+  if (Number.isFinite(storedMs)) {
+    const inferred = Number.isFinite(baseMs) ? Math.max(1, Math.round((storedMs - baseMs) / 60000)) : NORMAL_TEST_DURATION_MINUTES
+    return {
+      expiresAt: new Date(storedMs).toISOString(),
+      durationMinutes: inferred,
+      source: 'stored_expires_at',
+    }
+  }
+
+  const durationMinutes = NORMAL_TEST_DURATION_MINUTES
   return {
-    expiresAt: new Date(new Date(base).getTime() + durationMinutes * 60 * 1000).toISOString(),
+    expiresAt: new Date(baseMs + durationMinutes * 60 * 1000).toISOString(),
     durationMinutes,
-    source: 'current_setting',
+    source: 'fallback_default',
   }
 }

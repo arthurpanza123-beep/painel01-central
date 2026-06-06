@@ -72,12 +72,12 @@ const STATUS: Record<StatusTeste, { label: string; color: string }> = {
 
 // ——— Card de teste focado em countdown ———
 function TesteCard({
-  teste, onVerDetalhes, onAtivar, onAbrirPainel2, onExpirar, onCopiarUsuario, isExpiring, highlighted,
+  teste, onVerDetalhes, onAtivar, onAbrirPainel, onExpirar, onCopiarUsuario, isExpiring, highlighted,
 }: {
   teste: Teste
   onVerDetalhes: () => void
   onAtivar: () => void
-  onAbrirPainel2: () => void
+  onAbrirPainel: () => void
   onExpirar: () => void
   onCopiarUsuario: () => void
   isExpiring?: boolean
@@ -85,8 +85,10 @@ function TesteCard({
 }) {
   const { remaining, urgente, expirado, pct } = useCountdown(teste.expiresAt || teste.validade, teste.durationMinutes)
   const cfg = STATUS[teste.status]
-  const isAtivo = teste.status === 'ativo'
+  const canExpire = Boolean(teste.canExpire ?? (teste.status === 'ativo' || teste.status === 'sem_resposta'))
+  const isAtivo = teste.status === 'ativo' || canExpire
   const isExpirado = teste.status === 'expirado' || expirado
+  const isFinalizado = isExpirado && !canExpire
   const isXCloud = teste.app.toLowerCase().includes('xcloud')
 
   return (
@@ -95,6 +97,7 @@ function TesteCard({
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       className="group rounded-2xl p-5 transition-all relative overflow-hidden"
+      data-test-id={teste.id}
       style={{
         background: 'var(--card)',
         border: highlighted
@@ -107,7 +110,7 @@ function TesteCard({
     >
       {isAtivo && urgente && (
         <div
-          className="absolute -top-10 -right-10 h-28 w-28 rounded-full opacity-30"
+          className="absolute -top-10 -right-10 hidden h-28 w-28 rounded-full opacity-20 sm:block"
           style={{ background: 'radial-gradient(circle, #ef4444, transparent 70%)' }}
         />
       )}
@@ -196,7 +199,7 @@ function TesteCard({
                 <Zap className="h-3 w-3" /> Ativar cliente
               </button>
             )}
-            {(isAtivo || teste.status === 'sem_resposta') && (
+            {canExpire && (
               <button
                 onClick={onExpirar}
                 disabled={isExpiring}
@@ -207,18 +210,18 @@ function TesteCard({
                 {isExpiring ? 'Expirando...' : 'Expirar e enviar figurinha'}
               </button>
             )}
-            {isExpirado && (
+            {isFinalizado && (
               <button onClick={onAtivar} className="h-7 px-3 rounded-lg text-[11px] font-medium flex items-center gap-1.5 transition-all" style={{ background: 'rgba(34,197,94,0.1)', color: '#4ade80', border: '1px solid rgba(34,197,94,0.2)' }}>
                 <Zap className="h-3 w-3" /> Renovar / Ativar
               </button>
             )}
-            {isExpirado && (
+            {isFinalizado && (
               <button onClick={onCopiarUsuario} className="h-7 px-3 rounded-lg text-[11px] font-medium flex items-center gap-1.5 transition-all" style={{ background: 'rgba(148,163,184,0.1)', color: '#cbd5e1', border: '1px solid rgba(148,163,184,0.2)' }}>
                 <Copy className="h-3 w-3" /> Copiar usuário
               </button>
             )}
-            <button onClick={onAbrirPainel2} className="h-7 px-3 rounded-lg text-[11px] font-medium flex items-center gap-1.5 transition-all" style={{ background: 'rgba(59,130,246,0.1)', color: '#60a5fa', border: '1px solid rgba(59,130,246,0.2)' }}>
-              <ExternalLink className="h-3 w-3" /> {isExpirado ? 'Abrir painel' : 'Painel 2'}
+            <button onClick={onAbrirPainel} className="h-7 px-3 rounded-lg text-[11px] font-medium flex items-center gap-1.5 transition-all" style={{ background: 'rgba(59,130,246,0.1)', color: '#60a5fa', border: '1px solid rgba(59,130,246,0.2)' }}>
+              <ExternalLink className="h-3 w-3" /> Abrir painel
             </button>
           </div>
         </div>
@@ -239,8 +242,19 @@ export function TestesPage() {
   const [highlightedTestId, setHighlightedTestId] = useState<string | null>(null)
   const { addToast } = useToast()
 
+  const testsApiUrl = () => {
+    const params = new URLSearchParams(window.location.search)
+    const apiParams = new URLSearchParams()
+    const testId = params.get('test_id')
+    const clientId = params.get('client_id')
+    if (testId) apiParams.set('test_id', testId)
+    if (clientId) apiParams.set('client_id', clientId)
+    const query = apiParams.toString()
+    return query ? `/api/tests?${query}` : '/api/tests'
+  }
+
   const carregarTestes = async () => {
-    const res = await fetch('/api/tests', { cache: 'no-store' })
+    const res = await fetch(testsApiUrl(), { cache: 'no-store' })
     if (!res.ok) throw new Error('Falha ao carregar testes')
     const payload = await res.json()
     setTestes(Array.isArray(payload.items) ? payload.items : MOCK_TESTES)
@@ -253,7 +267,8 @@ export function TestesPage() {
     const urlTestId = params.get('test_id') || ''
     async function load() {
       try {
-        const res = await fetch('/api/tests', { cache: 'no-store' })
+        const apiUrl = urlTestId ? `/api/tests?${params.toString()}` : '/api/tests'
+        const res = await fetch(apiUrl, { cache: 'no-store' })
         if (!res.ok) throw new Error('Falha ao carregar testes')
         const payload = await res.json()
         if (!alive) return
@@ -263,6 +278,9 @@ export function TestesPage() {
           setSearch(urlTestId)
           setStatusFilter('todos')
           setHighlightedTestId(urlTestId)
+          window.setTimeout(() => {
+            document.querySelector(`[data-test-id="${CSS.escape(urlTestId)}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+          }, 250)
         }
       } catch {
         if (!alive) return
@@ -297,23 +315,25 @@ export function TestesPage() {
 
   const painelKey = (servidor: string) => servidor.toLowerCase().replace(/[^a-z0-9]/g, '')
 
-  const abrirPainel2 = (teste: Teste, flow = 'test_created') => {
-    const params = new URLSearchParams({
-      source: 'painel1',
-      flow,
-      test_id: teste.id,
-      client_name: teste.cliente,
-      client_phone: teste.telefone,
-      app: teste.app,
-      panel: teste.servidor,
-    })
-    window.open(`https://painel2.centralplayplus.com.br?${params.toString()}`, '_blank')
+  const providerUrlForTest = (teste: Teste) => (
+    getProviderPanelUrl(teste.servidor) || getProviderPanelUrl(painelKey(teste.servidor)) || 'https://pedidospec.online/#/customers'
+  )
+
+  const abrirPainelProvedor = (teste: Teste) => {
+    window.open(providerUrlForTest(teste), '_blank', 'noopener,noreferrer')
+  }
+
+  const safeCopyUsername = async (username: string | undefined | null) => {
+    const value = String(username || '').trim()
+    if (!value || value.includes('•')) return false
+    await navigator.clipboard.writeText(value)
+    return true
   }
 
   const handleExpirarTeste = async (teste: Teste) => {
     if (expiringTestId) return
 
-    const providerUrl = getProviderPanelUrl(teste.servidor) || getProviderPanelUrl(painelKey(teste.servidor)) || 'https://pedidospec.online/#/customers'
+    const providerUrl = providerUrlForTest(teste)
     const openedPanel = window.open('about:blank', '_blank')
     if (openedPanel) {
       openedPanel.opener = null
@@ -324,6 +344,8 @@ export function TestesPage() {
     setModalExpirar(teste)
 
     try {
+      let copied = await safeCopyUsername(teste.copyUsername)
+      if (copied) addToast('success', 'Usuário copiado')
       const res = await fetch('/api/tests/expire', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -339,15 +361,16 @@ export function TestesPage() {
       }
 
       const username = data.username || teste.usuario
-      if (username) {
-        await navigator.clipboard.writeText(username)
+      if (!copied && username) {
+        copied = await safeCopyUsername(username)
+        if (copied) addToast('success', 'Usuário copiado')
       }
       setTestes(prev => prev.map(item => item.id === teste.id ? { ...item, status: 'expirado' as StatusTeste } : item))
       await carregarTestes().catch(() => null)
       setModalExpirar(null)
       const alreadySent = data.already_expired || data.sticker_already_sent || data.dispatch?.already_sent
       const alreadyRunning = data.already_running || data.dispatch?.reason === 'already_running'
-      addToast('success', alreadyRunning ? 'Expiracao ja esta em andamento.' : alreadySent ? 'Usuario copiado. Figurinha ja enviada antes.' : 'Usuario copiado. Teste expirado e figurinha enviada.')
+      addToast('success', alreadyRunning ? 'Expiracao ja esta em andamento.' : alreadySent ? 'Teste ja estava expirado. Nada foi reenviado.' : 'Teste expirado e figurinha enviada.')
     } catch (err) {
       addToast('error', err instanceof Error ? err.message : 'Falha ao expirar teste')
     } finally {
@@ -356,18 +379,17 @@ export function TestesPage() {
   }
 
   const copiarUsuario = async (teste: Teste) => {
-    const username = teste.usuario || ''
-    if (!username) {
+    const copied = await safeCopyUsername(teste.copyUsername)
+    if (!copied) {
       addToast('error', 'Usuario indisponivel')
       return
     }
-    await navigator.clipboard.writeText(username)
     addToast('success', 'Copiado para a area de transferencia')
   }
 
   return (
     <>
-    <div className="flex-1 flex flex-col items-center px-6 py-10 min-h-screen">
+    <div className="flex-1 flex flex-col items-center px-4 py-10 sm:px-6 min-h-screen">
       {/* Header centralizado */}
       <div className="text-center mb-8 max-w-xl">
         <div className="flex items-center justify-center gap-2 mb-3">
@@ -390,7 +412,7 @@ export function TestesPage() {
       </div>
 
       {/* KPIs compactos */}
-      <div className="flex items-center gap-8 mb-8">
+      <div className="flex items-center gap-4 sm:gap-8 mb-8">
         {[
           { label: 'Testando', value: metricas.testesAtivos, color: '#22c55e' },
           { label: 'Expirados', value: metricas.testesExpirados, color: '#ef4444' },
@@ -405,8 +427,8 @@ export function TestesPage() {
 
       {/* Busca + filtros */}
       <div className="w-full max-w-3xl mb-6">
-        <div className="flex flex-col sm:flex-row gap-3">
-          <div className="relative flex-1">
+        <div className="flex flex-col lg:flex-row gap-3">
+          <div className="relative w-full lg:min-w-[260px] lg:flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
             <input
               type="text"
@@ -417,7 +439,7 @@ export function TestesPage() {
               style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
             />
           </div>
-          <div className="flex gap-1.5 flex-wrap">
+          <div className="flex gap-1.5 flex-wrap lg:shrink-0">
             {(['todos', 'ativo', 'sem_resposta', 'expirado', 'pago'] as const).map((s) => (
               <button
                 key={s}
@@ -451,7 +473,7 @@ export function TestesPage() {
                 teste={teste}
                 onVerDetalhes={() => addToast('info', `Detalhes: ${teste.usuario} / ${teste.senha}`)}
                 onAtivar={() => { window.dispatchEvent(new CustomEvent('centralplay:navigate', { detail: { page: 'ativar-clientes', test_id: teste.id } })) }}
-                onAbrirPainel2={() => abrirPainel2(teste)}
+                onAbrirPainel={() => abrirPainelProvedor(teste)}
                 onExpirar={() => {
                   if (expiringTestId) return
                   setBlockedPanelUrl(null)

@@ -33,6 +33,9 @@ export interface Teste {
   durationMinutes?: number
   gameModeDuration?: boolean
   xcloudRemoved?: boolean
+  canExpire?: boolean
+  copyUsername?: string
+  rawStatus?: string
   criadoEm: string
   horario: string
 }

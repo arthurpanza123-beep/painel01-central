@@ -275,7 +275,7 @@ function NeonBackground() {
     <div className="pointer-events-none absolute inset-0 overflow-hidden" style={{ zIndex: 0 }}>
       <Particles />
       <div
-        className="absolute rounded-full"
+        className="absolute hidden rounded-full md:block"
         style={{
           width: 700,
           height: 700,
@@ -287,7 +287,7 @@ function NeonBackground() {
         }}
       />
       <div
-        className="absolute rounded-full"
+        className="absolute hidden rounded-full md:block"
         style={{
           width: 550,
           height: 550,
@@ -299,7 +299,7 @@ function NeonBackground() {
         }}
       />
       <div
-        className="absolute rounded-full"
+        className="absolute hidden rounded-full md:block"
         style={{
           width: 800,
           height: 350,
