@@ -1,5 +1,6 @@
 'use client'
 
+import Image from 'next/image'
 import { cn } from '@/lib/utils'
 import type { NavPage } from '@/app/page'
 import { 
@@ -48,25 +49,16 @@ export function Sidebar({ activePage, onNavigate }: SidebarProps) {
         borderRight: '1px solid var(--sidebar-border)',
       }}
     >
-      {/* Logo + nome */}
-      <div className="mb-6 flex items-center gap-2.5 px-1.5">
-        <div
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl overflow-hidden"
-          style={{
-            background: 'rgba(59,130,246,0.12)',
-            border: '1px solid rgba(59,130,246,0.28)',
-            boxShadow: '0 0 18px rgba(59,130,246,0.22)',
-          }}
-        >
-          <svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" width="24" height="24" aria-label="Central Play Plus">
-            <path d="M14 11L30 20L14 29V11Z" fill="#3b82f6" />
-            <rect x="26" y="7" width="2" height="8" rx="1" fill="#60a5fa" opacity="0.7" />
-            <rect x="23" y="10" width="8" height="2" rx="1" fill="#60a5fa" opacity="0.7" />
-          </svg>
-        </div>
-        <span className="text-sm font-semibold leading-tight text-[color:var(--sidebar-foreground)]">
-          Central Play
-        </span>
+      {/* Logo */}
+      <div className="mb-6 px-1.5">
+        <Image
+          src="/images/central-play-logo.png"
+          alt="Central Play Plus"
+          width={760}
+          height={380}
+          priority
+          className="h-auto w-full"
+        />
       </div>
 
       {/* Nav items */}
