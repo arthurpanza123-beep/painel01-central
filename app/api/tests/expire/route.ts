@@ -3,6 +3,13 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getProviderPanelUrl } from '@/lib/config/provider-catalog'
 import { maskSensitiveText } from '@/lib/services/masking'
 import { effectiveTestExpiresAt, readOperationalSettings } from '@/lib/services/operational-settings'
+import {
+  getOperationalExpirationState,
+  getXcloudRemovalState,
+  isCustomerExpiredStickerSatisfied,
+  metadataString,
+  safeMetadata,
+} from '@/lib/services/test-expiration-operational'
 import { getSupabaseServerClient } from '@/lib/supabase/server'
 import { runXcloudWorker } from '@/lib/services/xcloud-worker'
 
@@ -12,19 +19,6 @@ const expiringTests = new Set<string>()
 
 function panelUrl(keyOrName: string | null | undefined) {
   return getProviderPanelUrl(String(keyOrName || '')) || getProviderPanelUrl('Yellow Box') || 'https://pedidospec.online/#/customers'
-}
-
-function safeMetadata(metadata: JsonRecord | null | undefined): JsonRecord {
-  return metadata && typeof metadata === 'object' && !Array.isArray(metadata) ? metadata : {}
-}
-
-function metadataString(metadata: JsonRecord, key: string): string {
-  const value = metadata[key]
-  return typeof value === 'string' ? value : ''
-}
-
-function isDispatchSent(metadata: JsonRecord): boolean {
-  return Boolean(metadataString(metadata, 'expired_dispatch_sent_at')) || metadataString(metadata, 'expired_dispatch_status') === 'sent'
 }
 
 function isOperatorNoticeSent(metadata: JsonRecord): boolean {
@@ -47,6 +41,25 @@ function formatDateTimeBR(value: string) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
   return date.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short', timeZone: 'America/Sao_Paulo' })
+}
+
+function isFreshRunning(metadata: JsonRecord): boolean {
+  if (metadataString(metadata, 'expired_dispatch_status') !== 'running') return false
+  const startedAt = metadataString(metadata, 'expired_dispatch_running_at') || metadataString(metadata, 'expired_operator_action_at')
+  const startedMs = startedAt ? new Date(startedAt).getTime() : NaN
+  return Number.isFinite(startedMs) && Date.now() - startedMs < 10 * 60 * 1000
+}
+
+async function readLatestTestMetadata(db: NonNullable<ReturnType<typeof getSupabaseServerClient>>, testId: string): Promise<JsonRecord> {
+  const { data } = await db.from('tests').select('legacy_metadata').eq('id', testId).maybeSingle()
+  return safeMetadata((data as { legacy_metadata?: JsonRecord | null } | null)?.legacy_metadata)
+}
+
+function xcloudResponseFromState(state: ReturnType<typeof getXcloudRemovalState>) {
+  if (state.notRequired) return { ok: true, not_required: true, status: 'not_required' }
+  if (state.alreadyRemoved) return { ok: true, already_removed: true, status: 'already_removed' }
+  if (state.removed || state.satisfied) return { ok: true, removed: true, status: 'removed' }
+  return { ok: false, status: state.status }
 }
 
 async function dispatchOperatorExpiredNotice(db: NonNullable<ReturnType<typeof getSupabaseServerClient>>, input: {
@@ -262,57 +275,55 @@ export async function POST(req: NextRequest) {
     },
   })
 
-  if (previousStatus === 'expired' && isDispatchSent(metadata)) {
-    await writeTestLog(db, 'TEST_EXPIRED_STICKER_SKIPPED_ALREADY_SENT', 'info', {
+  const initialOperationalState = getOperationalExpirationState({
+    status: previousStatus,
+    appKey: app?.key,
+    appName: app?.name,
+    deviceKey: test.device_key,
+    metadata,
+  })
+
+  if (previousStatus === 'expired' && initialOperationalState.complete) {
+    await writeTestLog(db, 'TEST_EXPIRE_SKIPPED_OPERATIONAL_ALREADY_COMPLETE', 'info', {
       client_id: test.client_id,
       test_id: test.id,
       account_id: test.account_id,
-      message: 'Teste ja expirado com dispatch test_expired registrado. Figurinha nao reenviada.',
-      metadata: { idempotency_key: idempotencyKey, expired_dispatch_sent_at: metadataString(metadata, 'expired_dispatch_sent_at') || null },
+      message: 'Teste ja expirado com expiração operacional concluida. Nada sera repetido.',
+      metadata: {
+        idempotency_key: idempotencyKey,
+        customer_expired_sticker_status: metadataString(metadata, 'customer_expired_sticker_status') || metadataString(metadata, 'expired_dispatch_status') || null,
+        xcloud_device_remove_status: metadataString(metadata, 'xcloud_device_remove_status') || metadataString(metadata, 'expired_xcloud_remove_status') || null,
+        operator_expire_action_completed_at: metadataString(metadata, 'operator_expire_action_completed_at') || null,
+      },
     })
 
+    const xcloudState = xcloudResponseFromState(initialOperationalState.xcloud)
     return NextResponse.json({
       ok: true,
       success: true,
       code: 'TEST_ALREADY_EXPIRED',
       already_expired: true,
+      status: 'expired',
+      sticker_sent: true,
+      already_sent: true,
       sticker_already_sent: true,
       test_id: test.id,
       client_id: test.client_id,
+      app: app?.name || app?.key || null,
+      panel: panel?.name || panel?.key || null,
       username,
       provider_url: providerUrl,
+      operational_completed: true,
       dispatch: { ok: true, already_sent: true, idempotency_key: idempotencyKey },
-      operator_notice: { skipped: true, reason: 'already_expired' },
-      xcloud_remove: { skipped: true, reason: 'already_expired' },
+      operator_notice: { skipped: true, reason: 'already_expired_operational_complete' },
+      xcloud_remove: xcloudState,
+      xcloud_removed: Boolean(initialOperationalState.xcloud.removed),
+      already_removed: Boolean(initialOperationalState.xcloud.alreadyRemoved),
+      not_required: Boolean(initialOperationalState.xcloud.notRequired),
     })
   }
 
-  if (previousStatus === 'expired') {
-    await writeTestLog(db, 'TEST_EXPIRE_SKIPPED_ALREADY_EXPIRED', 'info', {
-      client_id: test.client_id,
-      test_id: test.id,
-      account_id: test.account_id,
-      message: 'Teste ja estava expired. Nenhum envio ou remocao sera repetido.',
-      metadata: { idempotency_key: idempotencyKey, expired_dispatch_status: metadataString(metadata, 'expired_dispatch_status') || null },
-    })
-
-    return NextResponse.json({
-      ok: true,
-      success: true,
-      code: 'TEST_ALREADY_EXPIRED',
-      already_expired: true,
-      sticker_already_sent: isDispatchSent(metadata),
-      test_id: test.id,
-      client_id: test.client_id,
-      username,
-      provider_url: providerUrl,
-      dispatch: { ok: true, already_sent: isDispatchSent(metadata), skipped: true, reason: 'already_expired', idempotency_key: idempotencyKey },
-      operator_notice: { skipped: true, reason: 'already_expired' },
-      xcloud_remove: { skipped: true, reason: 'already_expired' },
-    })
-  }
-
-  if (expiringTests.has(test.id) || metadataString(metadata, 'expired_dispatch_status') === 'running') {
+  if (expiringTests.has(test.id) || isFreshRunning(metadata)) {
     await writeTestLog(db, 'TEST_EXPIRE_ALREADY_RUNNING', 'warning', {
       client_id: test.client_id,
       test_id: test.id,
@@ -338,14 +349,20 @@ export async function POST(req: NextRequest) {
   expiringTests.add(test.id)
 
   try {
-    const now = new Date().toISOString()
-    let operationalMetadata: JsonRecord = {
-      ...metadata,
-      expired_dispatch_status: 'running',
-      expired_operator_action_at: now,
-      manual_expire: {
-        expired_at: now,
-        operator_ref: operatorRef,
+	    const now = new Date().toISOString()
+	    const stickerAlreadySatisfied = isCustomerExpiredStickerSatisfied(metadata)
+	    let operationalMetadata: JsonRecord = {
+	      ...metadata,
+	      expired_dispatch_status: stickerAlreadySatisfied ? metadataString(metadata, 'expired_dispatch_status') || 'sent' : 'running',
+	      expired_dispatch_running_at: stickerAlreadySatisfied ? metadataString(metadata, 'expired_dispatch_running_at') || undefined : now,
+	      expired_dispatch_idempotency_key: idempotencyKey,
+	      customer_expired_sticker_idempotency_key: idempotencyKey,
+	      expired_operator_action_at: now,
+	      provider_panel_opened_at: metadataString(metadata, 'provider_panel_opened_at') || now,
+	      copied_username_at: username ? metadataString(metadata, 'copied_username_at') || now : metadataString(metadata, 'copied_username_at') || undefined,
+	      manual_expire: {
+	        expired_at: now,
+	        operator_ref: operatorRef,
         previous_status: previousStatus,
       },
     }
@@ -412,9 +429,21 @@ export async function POST(req: NextRequest) {
     })
 
     let xcloudRemove: unknown = null
-    const isXcloud = String(app?.key || app?.name || '').toLowerCase().includes('xcloud') || Boolean(test.device_key || metadata.device_key)
-    const xcloudRemoveAlreadyAttempted = Boolean(metadataString(metadata, 'expired_xcloud_remove_attempted_at'))
-    if (body.source === 'auto' && isXcloud) {
+    let xcloudState = getXcloudRemovalState({
+      appKey: app?.key,
+      appName: app?.name,
+      deviceKey: test.device_key,
+      metadata: operationalMetadata,
+    })
+
+    if (!xcloudState.required) {
+      operationalMetadata = {
+        ...operationalMetadata,
+        xcloud_device_remove_status: 'not_required',
+      }
+      xcloudRemove = { ok: true, not_required: true, status: 'not_required' }
+      await db.from('tests').update({ legacy_metadata: operationalMetadata }).eq('id', test.id).then(() => null)
+    } else if (body.source === 'auto') {
       xcloudRemove = { skipped: true, reason: 'auto_expire_requires_operator_confirmation' }
       await writeTestLog(db, 'XCLOUD_REMOVE_SKIPPED_AUTO_EXPIRE', 'info', {
         client_id: test.client_id,
@@ -423,13 +452,23 @@ export async function POST(req: NextRequest) {
         message: 'Expiracao automatica nao remove device XCloud sem confirmacao do operador.',
         metadata: { source: 'expire_due' },
       })
-    } else if (isXcloud && xcloudRemoveAlreadyAttempted) {
-      xcloudRemove = { skipped: true, reason: 'already_attempted' }
-    } else if (isXcloud) {
+    } else if (xcloudState.satisfied) {
+      const xcloudFinishedAt = metadataString(operationalMetadata, 'xcloud_device_removed_at') || metadataString(operationalMetadata, 'expired_xcloud_remove_finished_at') || new Date().toISOString()
+      operationalMetadata = {
+        ...operationalMetadata,
+        xcloud_device_removed_at: xcloudFinishedAt,
+        xcloud_device_remove_status: xcloudState.alreadyRemoved ? 'already_removed' : 'removed',
+        expired_xcloud_remove_finished_at: metadataString(operationalMetadata, 'expired_xcloud_remove_finished_at') || xcloudFinishedAt,
+        expired_xcloud_remove_status: metadataString(operationalMetadata, 'expired_xcloud_remove_status') || 'done',
+      }
+      xcloudRemove = xcloudResponseFromState(xcloudState)
+      await db.from('tests').update({ legacy_metadata: operationalMetadata }).eq('id', test.id).then(() => null)
+    } else {
       const xcloudAttemptedAt = new Date().toISOString()
       operationalMetadata = {
         ...operationalMetadata,
         expired_xcloud_remove_attempted_at: xcloudAttemptedAt,
+        xcloud_device_remove_status: 'running',
       }
       await db.from('tests').update({ legacy_metadata: operationalMetadata }).eq('id', test.id).then(() => null)
       await writeTestLog(db, 'XCLOUD_DEVICE_REMOVAL_STARTED', 'info', {
@@ -456,26 +495,36 @@ export async function POST(req: NextRequest) {
           metadata: { source: 'test_expire' },
         })
       }
+
+      const xcloudResult = xcloudRemove as { status?: string; success?: boolean; device_removed?: boolean; device_found?: boolean } | null
+      const xcloudRemoved = xcloudResult?.device_removed === true
+      const xcloudAlreadyRemoved = xcloudRemoved && xcloudResult?.device_found === false
+      const xcloudFinishedAt = new Date().toISOString()
       operationalMetadata = {
         ...operationalMetadata,
-        expired_xcloud_remove_finished_at: new Date().toISOString(),
-        expired_xcloud_remove_status: (xcloudRemove as { success?: boolean } | null)?.success === false ? 'failed' : 'done',
+        expired_xcloud_remove_finished_at: xcloudFinishedAt,
+        expired_xcloud_remove_status: xcloudRemoved ? 'done' : 'failed',
+        xcloud_device_removed_at: xcloudRemoved ? xcloudFinishedAt : metadataString(operationalMetadata, 'xcloud_device_removed_at') || undefined,
+        xcloud_device_remove_status: xcloudRemoved ? xcloudAlreadyRemoved ? 'already_removed' : 'removed' : 'failed',
+        xcloud_device_remove_failed_at: xcloudRemoved ? undefined : xcloudFinishedAt,
       }
-      await writeTestLog(db, 'XCLOUD_DEVICE_REMOVAL_COMPLETED', (xcloudRemove as { success?: boolean } | null)?.success === false ? 'warning' : 'success', {
+      await db.from('tests').update({ legacy_metadata: operationalMetadata }).eq('id', test.id).then(() => null)
+      await writeTestLog(db, 'XCLOUD_DEVICE_REMOVAL_COMPLETED', xcloudRemoved ? 'success' : 'warning', {
         client_id: test.client_id,
         test_id: test.id,
         account_id: test.account_id,
-        message: 'Remocao manual da device XCloud finalizada na expiracao.',
+        message: xcloudRemoved ? 'Remocao manual da device XCloud finalizada na expiracao.' : 'Remocao manual da device XCloud nao foi confirmada.',
         metadata: { source: 'manual_expire', result: xcloudRemove as JsonRecord },
       })
     }
 
+    const stickerAlreadySentBeforeDispatch = isCustomerExpiredStickerSatisfied(operationalMetadata)
     await writeTestLog(db, 'TEST_EXPIRED_DISPATCH_STARTED', 'info', {
       client_id: test.client_id,
       test_id: test.id,
       account_id: test.account_id,
-      message: body.source === 'auto' ? 'Expiracao automatica: dispatch de cliente ignorado.' : 'Disparo test_expired iniciado em background.',
-      metadata: { phone: client?.phone_e164 ? 'present' : 'missing', idempotency_key: idempotencyKey },
+      message: body.source === 'auto' ? 'Expiracao automatica: dispatch de cliente ignorado.' : stickerAlreadySentBeforeDispatch ? 'Figurinha test_expired ja registrada; dispatch nao sera duplicado.' : 'Disparo test_expired iniciado em background.',
+      metadata: { phone: client?.phone_e164 ? 'present' : 'missing', already_sent: stickerAlreadySentBeforeDispatch, idempotency_key: idempotencyKey },
     })
 
     let dispatchResult: unknown = null
@@ -485,8 +534,29 @@ export async function POST(req: NextRequest) {
       operationalMetadata = {
         ...operationalMetadata,
         expired_dispatch_status: metadataString(metadata, 'expired_dispatch_status') || 'skipped_auto',
+        expired_dispatch_running_at: undefined,
       }
       await db.from('tests').update({ legacy_metadata: operationalMetadata }).eq('id', test.id).then(() => null)
+    } else if (stickerAlreadySentBeforeDispatch) {
+      const finishedAt = metadataString(operationalMetadata, 'customer_expired_sticker_sent_at') || metadataString(operationalMetadata, 'expired_dispatch_sent_at') || new Date().toISOString()
+      dispatchResult = { ok: true, already_sent: true, skipped: true, reason: 'already_sent', idempotency_key: idempotencyKey }
+      operationalMetadata = {
+        ...operationalMetadata,
+        expired_dispatch_status: metadataString(operationalMetadata, 'expired_dispatch_status') || 'sent',
+        expired_dispatch_sent_at: metadataString(operationalMetadata, 'expired_dispatch_sent_at') || finishedAt,
+        expired_dispatch_running_at: undefined,
+	        customer_expired_sticker_status: metadataString(operationalMetadata, 'customer_expired_sticker_status') || 'already_sent',
+	        customer_expired_sticker_sent_at: metadataString(operationalMetadata, 'customer_expired_sticker_sent_at') || finishedAt,
+	        customer_expired_sticker_idempotency_key: idempotencyKey,
+	      }
+      await db.from('tests').update({ legacy_metadata: operationalMetadata }).eq('id', test.id).then(() => null)
+      await writeTestLog(db, 'TEST_EXPIRED_STICKER_SKIPPED_ALREADY_SENT', 'info', {
+        client_id: test.client_id,
+        test_id: test.id,
+        account_id: test.account_id,
+        message: 'Figurinha test_expired ja registrada no Painel 1. Nada foi reenviado.',
+        metadata: { idempotency_key: idempotencyKey },
+      })
     } else try {
       const dispatchResponse = await fetch(`${painel2BaseUrl()}/api/flows/dispatch`, {
         method: 'POST',
@@ -515,7 +585,7 @@ export async function POST(req: NextRequest) {
       dispatchResult = await dispatchResponse.json().catch(() => ({ ok: false, code: 'INVALID_RESPONSE' }))
       const resultRecord = dispatchResult as { ok?: boolean; dryRun?: boolean; already_sent?: boolean; code?: string; mediaResult?: { ok?: boolean; code?: string } }
       const mediaFailed = resultRecord.mediaResult && resultRecord.mediaResult.ok === false
-      const sent = Boolean(resultRecord.ok && !mediaFailed)
+      const sent = Boolean(resultRecord.already_sent || (resultRecord.ok && !mediaFailed))
       await writeTestLog(db, resultRecord.already_sent ? 'TEST_EXPIRED_STICKER_SKIPPED_ALREADY_SENT' : sent ? 'TEST_EXPIRED_STICKER_SENT' : 'TEST_EXPIRED_STICKER_FAILED', sent ? 'success' : 'error', {
         client_id: test.client_id,
         test_id: test.id,
@@ -535,10 +605,16 @@ export async function POST(req: NextRequest) {
       const dispatchMetadata = {
         ...operationalMetadata,
         expired_dispatch_status: sent ? 'sent' : 'failed',
-        expired_dispatch_sent_at: sent ? finishedAt : metadataString(metadata, 'expired_dispatch_sent_at') || undefined,
+        expired_dispatch_sent_at: sent ? metadataString(metadata, 'expired_dispatch_sent_at') || finishedAt : metadataString(metadata, 'expired_dispatch_sent_at') || undefined,
         expired_dispatch_failed_at: sent ? undefined : finishedAt,
+        expired_dispatch_running_at: undefined,
         expired_dispatch_code: resultRecord.code || null,
-      }
+	        customer_expired_sticker_status: resultRecord.already_sent ? 'already_sent' : sent ? 'sent' : 'failed',
+	        customer_expired_sticker_sent_at: sent ? metadataString(metadata, 'customer_expired_sticker_sent_at') || metadataString(metadata, 'expired_dispatch_sent_at') || finishedAt : metadataString(metadata, 'customer_expired_sticker_sent_at') || undefined,
+	        customer_expired_sticker_failed_at: sent ? undefined : finishedAt,
+	        customer_expired_sticker_code: resultRecord.code || null,
+	        customer_expired_sticker_idempotency_key: idempotencyKey,
+	      }
       await db
         .from('tests')
         .update({
@@ -553,7 +629,11 @@ export async function POST(req: NextRequest) {
         ...operationalMetadata,
         expired_dispatch_status: 'failed',
         expired_dispatch_failed_at: new Date().toISOString(),
-      }
+        expired_dispatch_running_at: undefined,
+	        customer_expired_sticker_status: 'failed',
+	        customer_expired_sticker_failed_at: new Date().toISOString(),
+	        customer_expired_sticker_idempotency_key: idempotencyKey,
+	      }
       await db
         .from('tests')
         .update({
@@ -571,39 +651,101 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    operatorNoticeResult = await dispatchOperatorExpiredNotice(db, {
-      test,
-      metadata: operationalMetadata,
-      client,
+	    operatorNoticeResult = await dispatchOperatorExpiredNotice(db, {
+	      test,
+	      metadata: operationalMetadata,
+	      client,
       app,
       panel,
       username,
       expiredAt,
       operatorRef,
-      source: body.source === 'auto' ? 'auto' : 'manual',
-    }).catch((error) => ({ ok: false, error: error instanceof Error ? error.message : String(error) }))
+	      source: body.source === 'auto' ? 'auto' : 'manual',
+	    }).catch((error) => ({ ok: false, error: error instanceof Error ? error.message : String(error) }))
 
-    return NextResponse.json({
-      ok: true,
-      success: true,
-      code: 'TEST_EXPIRED',
-      test_id: test.id,
-      client_id: test.client_id,
-      client_name: client?.name || null,
-      client_phone: client?.phone_e164 || null,
-      app: app?.name || app?.key || null,
-      panel: panel?.name || panel?.key || null,
-      username,
-      provider_url: providerUrl,
-      idempotency_key: idempotencyKey,
-      dispatch: dispatchResult,
-      operator_notice: operatorNoticeResult,
-      xcloud_remove: xcloudRemove,
-    })
-  } catch (error) {
-    await writeTestLog(db, 'TEST_EXPIRE_FAILED', 'error', {
-      client_id: test.client_id,
-      test_id: test.id,
+	    operationalMetadata = {
+	      ...operationalMetadata,
+	      ...await readLatestTestMetadata(db, test.id),
+	    }
+	    const completionCheck = getOperationalExpirationState({
+	      status: 'expired',
+	      appKey: app?.key,
+	      appName: app?.name,
+	      deviceKey: test.device_key,
+	      metadata: operationalMetadata,
+	    })
+	    const canCompleteOperationalAction = body.source !== 'auto' && completionCheck.customerStickerSatisfied && completionCheck.xcloudRemovalSatisfied
+	    const completionAt = metadataString(operationalMetadata, 'operator_expire_action_completed_at') || new Date().toISOString()
+
+	    operationalMetadata = canCompleteOperationalAction ? {
+	      ...operationalMetadata,
+	      operator_expire_action_status: 'completed',
+	      operator_expire_action_completed_at: completionAt,
+	      provider_panel_opened_at: metadataString(operationalMetadata, 'provider_panel_opened_at') || completionAt,
+	      copied_username_at: username ? metadataString(operationalMetadata, 'copied_username_at') || completionAt : metadataString(operationalMetadata, 'copied_username_at') || undefined,
+	    } : {
+	      ...operationalMetadata,
+	      operator_expire_action_status: metadataString(operationalMetadata, 'operator_expire_action_status') === 'completed' ? 'completed' : 'pending',
+	      operator_expire_action_pending_reason: !completionCheck.customerStickerSatisfied ? 'customer_sticker_pending' : !completionCheck.xcloudRemovalSatisfied ? 'xcloud_remove_pending' : 'auto_expire',
+	    }
+	    await db.from('tests').update({ legacy_metadata: operationalMetadata }).eq('id', test.id).then(() => null)
+
+	    const finalState = getOperationalExpirationState({
+	      status: 'expired',
+	      appKey: app?.key,
+	      appName: app?.name,
+	      deviceKey: test.device_key,
+	      metadata: operationalMetadata,
+	    })
+	    xcloudState = finalState.xcloud
+	    const dispatchRecord = dispatchResult as { already_sent?: boolean } | null
+	    const customerStickerStatus = metadataString(operationalMetadata, 'customer_expired_sticker_status')
+	    const alreadySent = Boolean(dispatchRecord?.already_sent || customerStickerStatus === 'already_sent')
+	    const xcloudRemoveResponse = xcloudRemove || xcloudResponseFromState(xcloudState)
+	    const pendingReason = finalState.complete ? null : !finalState.customerStickerSatisfied ? 'customer_sticker_pending' : !finalState.xcloudRemovalSatisfied ? 'xcloud_remove_pending' : 'operator_action_pending'
+
+	    return NextResponse.json({
+	      ok: true,
+	      success: true,
+	      code: finalState.complete ? previousStatus === 'expired' ? 'TEST_OPERATIONAL_EXPIRATION_COMPLETED' : 'TEST_EXPIRED' : 'TEST_EXPIRATION_OPERATIONAL_PENDING',
+	      status: 'expired',
+	      already_expired: previousStatus === 'expired',
+	      test_id: test.id,
+	      client_id: test.client_id,
+	      client_name: client?.name || null,
+	      client_phone: client?.phone_e164 || null,
+	      app: app?.name || app?.key || null,
+	      panel: panel?.name || panel?.key || null,
+	      username,
+	      provider_url: providerUrl,
+	      idempotency_key: idempotencyKey,
+	      sticker_sent: finalState.customerStickerSatisfied,
+	      already_sent: alreadySent,
+	      sticker_already_sent: alreadySent,
+	      xcloud_removed: Boolean(xcloudState.removed || xcloudState.alreadyRemoved),
+	      already_removed: Boolean(xcloudState.alreadyRemoved),
+	      not_required: Boolean(xcloudState.notRequired),
+	      operational_completed: finalState.complete,
+	      pending_reason: pendingReason,
+	      dispatch: dispatchResult,
+	      operator_notice: operatorNoticeResult,
+	      xcloud_remove: xcloudRemoveResponse,
+	    })
+	  } catch (error) {
+	    const failedAt = new Date().toISOString()
+	    const latestMetadata = await readLatestTestMetadata(db, test.id).catch(() => metadata)
+	    await db.from('tests').update({
+	      legacy_metadata: {
+	        ...latestMetadata,
+	        expired_dispatch_running_at: undefined,
+	        operator_expire_action_status: 'pending',
+	        operator_expire_action_pending_reason: 'route_failed',
+	        operator_expire_action_failed_at: failedAt,
+	      },
+	    }).eq('id', test.id).then(() => null)
+	    await writeTestLog(db, 'TEST_EXPIRE_FAILED', 'error', {
+	      client_id: test.client_id,
+	      test_id: test.id,
       account_id: test.account_id,
       message: error instanceof Error ? error.message : 'Falha ao expirar teste.',
       metadata: { idempotency_key: idempotencyKey },

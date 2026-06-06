@@ -5,6 +5,7 @@ import { formatDateBR } from '@/lib/services/date-normalizer'
 import { maskDeviceKey, maskPassword, maskPhone, maskUrl, maskUsername } from '@/lib/services/masking'
 import { effectiveTestExpiresAt, readOperationalSettings } from '@/lib/services/operational-settings'
 import { isOperationalNoise, operationWindows } from '@/lib/services/operational-window'
+import { getXcloudRemovalState, needsOperationalExpirationAction } from '@/lib/services/test-expiration-operational'
 import { getSupabaseServerClient, isSupabaseServerConfigured } from '@/lib/supabase/server'
 
 export type TestsQueryResult = {
@@ -55,15 +56,6 @@ function mapOperationalStatus(status: string | null, expires: string): StatusTes
   const mapped = mapStatus(status)
   if (mapped === 'ativo' && new Date(expires).getTime() <= Date.now()) return 'expirado'
   return mapped
-}
-
-function canExpireOperationally(status: string | null): boolean {
-  return status === 'active' || status === 'generating' || status === 'pending'
-}
-
-function isDispatchSent(metadata: Record<string, unknown> | null | undefined): boolean {
-  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return false
-  return Boolean(metadata.expired_dispatch_sent_at) || metadata.expired_dispatch_status === 'sent'
 }
 
 function buildMockItems(): Teste[] {
@@ -134,7 +126,19 @@ export async function getTestsData(options: TestsQueryOptions = {}): Promise<Tes
       const metadataM3u = typeof legacy.optional_m3u_url === 'string' ? legacy.optional_m3u_url : ''
       const metadataHls = typeof legacy.optional_hls_url === 'string' ? legacy.optional_hls_url : ''
       const rawUsername = account?.username || metadataUsername || ''
-      const canExpire = canExpireOperationally(test.status) && !isDispatchSent(legacy)
+      const xcloudRemoval = getXcloudRemovalState({
+        appKey: app?.key,
+        appName: app?.name,
+        deviceKey: test.device_key,
+        metadata: legacy,
+      })
+      const canExpire = needsOperationalExpirationAction({
+        status: test.status,
+        appKey: app?.key,
+        appName: app?.name,
+        deviceKey: test.device_key,
+        metadata: legacy,
+      })
 
       return {
         id: test.id,
@@ -151,7 +155,7 @@ export async function getTestsData(options: TestsQueryOptions = {}): Promise<Tes
         expiresAt: expires,
         durationMinutes: effective.durationMinutes,
         gameModeDuration: effective.durationMinutes === 45,
-        xcloudRemoved: Boolean(legacy.xcloud_worker && typeof legacy.xcloud_worker === 'object' && !Array.isArray(legacy.xcloud_worker) && (legacy.xcloud_worker as Record<string, unknown>).device_removed),
+        xcloudRemoved: xcloudRemoval.satisfied && xcloudRemoval.required,
         canExpire,
         copyUsername: rawUsername,
         rawStatus: test.status || '',

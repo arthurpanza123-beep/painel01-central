@@ -177,7 +177,7 @@ export default function App() {
         onCancel={() => setConfirmGameModeOpen(false)}
         onConfirm={() => persistGameMode(true)}
       />
-      <main className="flex-1 min-w-0 overflow-y-auto pt-16 md:pt-0">
+	      <main className="flex-1 min-w-0 overflow-y-auto pt-16 md:pt-14">
         {page === 'dashboard'      && <DashboardPage onNavigate={navigate} />}
         {page === 'pipeline'       && <PipelinePage />}
         {page === 'gerar-teste'    && <GerarTesteWizard />}
@@ -198,14 +198,13 @@ export default function App() {
 function GameModeToggle({ settings, busy, onToggle }: { settings: OperationalSettings; busy: boolean; onToggle: () => void }) {
   const active = settings.game_mode_enabled
   return (
-    <button
-      onClick={onToggle}
-      disabled={busy}
-      className="fixed flex items-center gap-2 rounded-xl px-3 py-2 text-left transition-all disabled:opacity-70"
-      style={{
-        top: 'calc(12px + env(safe-area-inset-top))',
-        left: 'calc(12px + env(safe-area-inset-left))',
-        zIndex: 9998,
+	    <button
+	      onClick={onToggle}
+	      disabled={busy}
+	      className="fixed left-[calc(12px+env(safe-area-inset-left))] md:left-[228px] flex items-center gap-2 rounded-xl px-3 py-2 text-left transition-all disabled:opacity-70"
+	      style={{
+	        top: 'calc(12px + env(safe-area-inset-top))',
+	        zIndex: 9998,
         background: active ? 'rgba(245,158,11,0.18)' : 'rgba(15,23,42,0.88)',
         border: active ? '1px solid rgba(245,158,11,0.38)' : '1px solid rgba(148,163,184,0.22)',
         color: active ? '#fde68a' : '#cbd5e1',

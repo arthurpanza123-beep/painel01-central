@@ -240,6 +240,7 @@ export function TestesPage() {
   const [expiringTestId, setExpiringTestId] = useState<string | null>(null)
   const [blockedPanelUrl, setBlockedPanelUrl] = useState<string | null>(null)
   const [highlightedTestId, setHighlightedTestId] = useState<string | null>(null)
+  const [selectedLinkTestId, setSelectedLinkTestId] = useState<string | null>(null)
   const { addToast } = useToast()
 
   const testsApiUrl = () => {
@@ -272,11 +273,11 @@ export function TestesPage() {
         if (!res.ok) throw new Error('Falha ao carregar testes')
         const payload = await res.json()
         if (!alive) return
-        setTestes(Array.isArray(payload.items) ? payload.items : MOCK_TESTES)
-        setDataSource(payload.data_source === 'supabase' ? 'supabase' : 'mock')
-        if (urlTestId) {
-          setSearch(urlTestId)
-          setStatusFilter('todos')
+	        setTestes(Array.isArray(payload.items) ? payload.items : MOCK_TESTES)
+	        setDataSource(payload.data_source === 'supabase' ? 'supabase' : 'mock')
+	        if (urlTestId) {
+	          setSelectedLinkTestId(urlTestId)
+	          setStatusFilter('todos')
           setHighlightedTestId(urlTestId)
           window.setTimeout(() => {
             document.querySelector(`[data-test-id="${CSS.escape(urlTestId)}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
@@ -323,12 +324,16 @@ export function TestesPage() {
     window.open(providerUrlForTest(teste), '_blank', 'noopener,noreferrer')
   }
 
-  const safeCopyUsername = async (username: string | undefined | null) => {
-    const value = String(username || '').trim()
-    if (!value || value.includes('•')) return false
-    await navigator.clipboard.writeText(value)
-    return true
-  }
+	  const safeCopyUsername = async (username: string | undefined | null) => {
+	    const value = String(username || '').trim()
+	    if (!value || value.includes('•')) return false
+	    try {
+	      await navigator.clipboard.writeText(value)
+	      return true
+	    } catch {
+	      return false
+	    }
+	  }
 
   const handleExpirarTeste = async (teste: Teste) => {
     if (expiringTestId) return
@@ -338,10 +343,10 @@ export function TestesPage() {
     if (openedPanel) {
       openedPanel.opener = null
       openedPanel.location.href = providerUrl
-    }
-    setBlockedPanelUrl(openedPanel ? null : providerUrl)
-    setExpiringTestId(teste.id)
-    setModalExpirar(teste)
+	    }
+	    setBlockedPanelUrl(openedPanel ? null : providerUrl)
+	    setExpiringTestId(teste.id)
+	    setModalExpirar(null)
 
     try {
       let copied = await safeCopyUsername(teste.copyUsername)
@@ -365,14 +370,25 @@ export function TestesPage() {
         copied = await safeCopyUsername(username)
         if (copied) addToast('success', 'Usuário copiado')
       }
-      setTestes(prev => prev.map(item => item.id === teste.id ? { ...item, status: 'expirado' as StatusTeste } : item))
-      await carregarTestes().catch(() => null)
-      setModalExpirar(null)
-      const alreadySent = data.already_expired || data.sticker_already_sent || data.dispatch?.already_sent
-      const alreadyRunning = data.already_running || data.dispatch?.reason === 'already_running'
-      addToast('success', alreadyRunning ? 'Expiracao ja esta em andamento.' : alreadySent ? 'Teste ja estava expirado. Nada foi reenviado.' : 'Teste expirado e figurinha enviada.')
-    } catch (err) {
-      addToast('error', err instanceof Error ? err.message : 'Falha ao expirar teste')
+	      setTestes(prev => prev.map(item => item.id === teste.id ? { ...item, status: 'expirado' as StatusTeste } : item))
+	      await carregarTestes().catch(() => null)
+	      setModalExpirar(null)
+	      const alreadySent = data.already_sent || data.sticker_already_sent || data.dispatch?.already_sent
+	      const alreadyRemoved = data.already_removed || data.xcloud_remove?.already_removed
+	      const alreadyRunning = data.already_running || data.dispatch?.reason === 'already_running'
+	      if (data.operational_completed === false) {
+	        const reason = data.pending_reason === 'xcloud_remove_pending'
+	          ? 'Figurinha processada, mas a remocao XCloud ainda esta pendente.'
+	          : data.pending_reason === 'customer_sticker_pending'
+	          ? 'Nao foi possivel confirmar o envio da figurinha.'
+	          : 'Expiracao operacional ainda pendente.'
+	        addToast('error', reason)
+	      } else {
+	        addToast('success', alreadyRunning ? 'Expiracao ja esta em andamento.' : alreadySent || alreadyRemoved ? 'Expiracao operacional ja estava concluida.' : 'Teste expirado e figurinha enviada.')
+	      }
+	    } catch (err) {
+	      setModalExpirar(null)
+	      addToast('error', err instanceof Error ? err.message : 'Falha ao expirar teste')
     } finally {
       setExpiringTestId(null)
     }
@@ -403,12 +419,18 @@ export function TestesPage() {
           {metricas.testesAtivos} testando
           {metricas.testesExpirados > 0 && ` · ${metricas.testesExpirados} expirados`}
           {metricas.testesConvertidos > 0 && ` · ${metricas.testesConvertidos} convertidos`}
-        </p>
-        <p className="text-[10px] text-slate-600 mt-1">A duração vem do próprio teste: 45 min em horário de jogo ou 1h15 no modo normal.</p>
-        <p className="mt-2 inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-medium"
-           style={{ background: dataSource === 'supabase' ? 'rgba(34,197,94,0.12)' : 'rgba(245,158,11,0.12)', color: dataSource === 'supabase' ? '#4ade80' : '#fbbf24' }}>
-          Fonte: {dataSource === 'supabase' ? 'Supabase' : 'Mock'}
-        </p>
+	        </p>
+	        <p className="text-[10px] text-slate-600 mt-1">A duração vem do próprio teste: 45 min em horário de jogo ou 1h15 no modo normal.</p>
+	        {selectedLinkTestId && (
+	          <p className="mt-2 inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-medium"
+	             style={{ background: 'rgba(96,165,250,0.12)', color: '#93c5fd', border: '1px solid rgba(96,165,250,0.18)' }}>
+	            Teste selecionado pelo link
+	          </p>
+	        )}
+	        <p className="mt-2 inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-medium"
+	           style={{ background: dataSource === 'supabase' ? 'rgba(34,197,94,0.12)' : 'rgba(245,158,11,0.12)', color: dataSource === 'supabase' ? '#4ade80' : '#fbbf24' }}>
+	          Fonte: {dataSource === 'supabase' ? 'Supabase' : 'Mock'}
+	        </p>
       </div>
 
       {/* KPIs compactos */}
@@ -425,9 +447,23 @@ export function TestesPage() {
         ))}
       </div>
 
-      {/* Busca + filtros */}
-      <div className="w-full max-w-3xl mb-6">
-        <div className="flex flex-col lg:flex-row gap-3">
+	      {/* Busca + filtros */}
+	      <div className="w-full max-w-3xl mb-6">
+	        {blockedPanelUrl && (
+	          <div className="mb-3 rounded-xl p-3 text-sm text-slate-300" style={{ background: 'rgba(37,99,235,0.12)', border: '1px solid rgba(96,165,250,0.24)' }}>
+	            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+	              <span>Popup bloqueado. O usuario ja foi copiado quando disponivel.</span>
+	              <button
+	                onClick={() => window.open(blockedPanelUrl, '_blank', 'noopener,noreferrer')}
+	                className="h-10 rounded-lg px-3 text-xs font-semibold text-white"
+	                style={{ background: '#2563eb' }}
+	              >
+	                Abrir painel do provedor
+	              </button>
+	            </div>
+	          </div>
+	        )}
+	        <div className="flex flex-col lg:flex-row gap-3">
           <div className="relative w-full lg:min-w-[260px] lg:flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
             <input
@@ -474,11 +510,11 @@ export function TestesPage() {
                 onVerDetalhes={() => addToast('info', `Detalhes: ${teste.usuario} / ${teste.senha}`)}
                 onAtivar={() => { window.dispatchEvent(new CustomEvent('centralplay:navigate', { detail: { page: 'ativar-clientes', test_id: teste.id } })) }}
                 onAbrirPainel={() => abrirPainelProvedor(teste)}
-                onExpirar={() => {
-                  if (expiringTestId) return
-                  setBlockedPanelUrl(null)
-                  setModalExpirar(teste)
-                }}
+	                onExpirar={() => {
+	                  if (expiringTestId) return
+	                  setBlockedPanelUrl(null)
+	                  handleExpirarTeste(teste)
+	                }}
                 onCopiarUsuario={() => copiarUsuario(teste)}
                 isExpiring={expiringTestId === teste.id}
                 highlighted={highlightedTestId === teste.id}
