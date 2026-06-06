@@ -151,14 +151,14 @@ function CreditoCard({ credito }: { credito: CreditoPainel }) {
           </div>
           <div>
             <p className="text-sm font-medium text-white">{credito.painel}</p>
-            <p className="text-[10px] text-slate-500">R$ {credito.custoPorAtivacao.toFixed(2)}/ativação</p>
+            <p className="text-[10px] text-slate-500">{credito.custoPorAtivacao.toFixed(2)} crédito/ativação</p>
           </div>
         </div>
         <div className="text-right">
           <p className="text-lg font-bold" style={{ color: baixo ? '#ef4444' : '#22c55e', fontFamily: 'var(--font-display)' }}>
-            R$ {credito.saldo.toFixed(0)}
+            {credito.saldo.toFixed(0)}
           </p>
-          <p className="text-[10px] text-slate-500">saldo</p>
+          <p className="text-[10px] text-slate-500">créditos</p>
         </div>
       </div>
       <div className="flex items-center justify-between">
@@ -228,7 +228,7 @@ export function FinanceiroPage() {
 
       {/* KPIs grandes */}
       <div className="w-full max-w-4xl grid grid-cols-2 lg:grid-cols-4 gap-3 mb-8">
-        <BigKPI label="Receita atual" value={`R$ ${fin.receitaMesAtual.toFixed(0)}`} color="#22c55e" sub="+12% este mês" icon={DollarSign} />
+        <BigKPI label="Recebido no mês" value={`R$ ${fin.receitaMesAtual.toFixed(0)}`} color="#22c55e" sub="pagamentos confirmados" icon={DollarSign} />
         <BigKPI label="Renovação mensal prevista" value={`R$ ${(fin.renovacaoMensalPrevista ?? fin.receitaPrevista30d).toFixed(0)}`} color="#60a5fa" sub={`${fin.clientesContados ?? fin.renovacoesPrevistas} clientes contados`} icon={TrendingUp} />
         <BigKPI label="Lucro estimado" value={`R$ ${fin.lucroEstimado.toFixed(0)}`} color="#a78bfa" icon={Target} />
         <BigKPI label="Ticket médio" value={`R$ ${fin.ticketMedio.toFixed(0)}`} color="#f59e0b" icon={Wallet} />
@@ -286,13 +286,13 @@ export function FinanceiroPage() {
         <div className="rounded-2xl p-6" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
           <div className="flex items-center gap-2 mb-5">
             <TrendingUp className="h-4 w-4" style={{ color: '#60a5fa' }} />
-            <h2 className="text-sm font-semibold text-white">Projeção de renovação</h2>
+            <h2 className="text-sm font-semibold text-white">Vencimentos e projeções reais</h2>
           </div>
           <div className="space-y-4">
-            <Bar label="Mensal" value={fin.receitaPrevista30d} max={maxProjecao} color="#22c55e" />
-            <Bar label="60 dias" value={fin.receitaPrevista60d} max={maxProjecao} color="#60a5fa" />
-            <Bar label="90 dias" value={fin.receitaPrevista90d} max={maxProjecao} color="#a78bfa" />
-            <Bar label="30d venc." value={fin.receitaVencimento30d ?? fin.receitaPrevista30d} max={maxProjecao} color="#f59e0b" />
+            <Bar label="Mensal prev." value={fin.renovacaoMensalPrevista ?? 0} max={maxProjecao} color="#22c55e" />
+            <Bar label="Próx. 30d" value={fin.receitaPrevista30d} max={maxProjecao} color="#f59e0b" />
+            <Bar label="Proj. 60d" value={fin.receitaPrevista60d} max={maxProjecao} color="#60a5fa" />
+            <Bar label="Proj. 90d" value={fin.receitaPrevista90d} max={maxProjecao} color="#a78bfa" />
           </div>
         </div>
       </div>
@@ -327,7 +327,7 @@ export function FinanceiroPage() {
             <Wallet className="h-4 w-4" style={{ color: '#60a5fa' }} />
             <h2 className="text-sm font-semibold text-white">Créditos dos painéis</h2>
           </div>
-          <span className="text-xs text-slate-500">Total: R$ {fin.creditosDisponiveis.toFixed(0)}</span>
+          <span className="text-xs text-slate-500">Total: {fin.creditosDisponiveis.toFixed(0)} créditos</span>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {finance.creditos.map((credito) => (

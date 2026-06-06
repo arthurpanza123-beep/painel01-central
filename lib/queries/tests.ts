@@ -3,6 +3,7 @@ import crypto from 'crypto'
 import { MOCK_TESTES, type StatusTeste, type Teste } from '@/lib/mock-data'
 import { formatDateBR } from '@/lib/services/date-normalizer'
 import { maskDeviceKey, maskPassword, maskPhone, maskUrl, maskUsername } from '@/lib/services/masking'
+import { isOperationalNoise, operationWindows } from '@/lib/services/operational-window'
 import { getSupabaseServerClient, isSupabaseServerConfigured } from '@/lib/supabase/server'
 
 export type TestsQueryResult = {
@@ -44,6 +45,12 @@ function mapStatus(status: string | null): StatusTeste {
   return 'sem_resposta'
 }
 
+function mapOperationalStatus(status: string | null, expires: string): StatusTeste {
+  const mapped = mapStatus(status)
+  if (mapped === 'ativo' && new Date(expires).getTime() <= Date.now()) return 'expirado'
+  return mapped
+}
+
 function buildMockItems(): Teste[] {
   return MOCK_TESTES.map((teste) => ({
     ...teste,
@@ -61,8 +68,9 @@ export async function getTestsData(): Promise<TestsQueryResult> {
   if (!db) return { data_source: 'mock', items: buildMockItems() }
 
   try {
+    const { todayStartIso } = operationWindows()
     const [testsRes, clientsRes, accountsRes, appsRes, panelsRes] = await Promise.all([
-      db.from('tests').select('id,client_id,app_id,panel_id,account_id,device_key,provider,provider_code,status,requested_at,activated_at,expires_at,failed_at,created_at,legacy_metadata').order('created_at', { ascending: false }).limit(100),
+      db.from('tests').select('id,client_id,app_id,panel_id,account_id,device_key,provider,provider_code,status,requested_at,activated_at,expires_at,failed_at,created_at,legacy_metadata').gte('created_at', todayStartIso).order('created_at', { ascending: false }).limit(100),
       db.from('clients').select('id,name,phone_e164'),
       db.from('accounts').select('id,username,password_secret,m3u_url_secret,hls_url_secret'),
       db.from('apps').select('id,name,key'),
@@ -80,13 +88,15 @@ export async function getTestsData(): Promise<TestsQueryResult> {
     const appsById = new Map((appsRes.data as AppRow[] || []).map((row) => [row.id, row]))
     const panelsById = new Map((panelsRes.data as PanelRow[] || []).map((row) => [row.id, row]))
 
-    const items: Teste[] = (testsRes.data as TestRow[] || []).map((test) => {
+    const items: Teste[] = (testsRes.data as TestRow[] || [])
+      .filter((test) => !isOperationalNoise(clientsById.get(test.client_id)?.name))
+      .map((test) => {
       const client = clientsById.get(test.client_id)
       const account = test.account_id ? accountsById.get(test.account_id) : undefined
       const app = test.app_id ? appsById.get(test.app_id) : undefined
       const panel = test.panel_id ? panelsById.get(test.panel_id) : undefined
       const created = test.activated_at || test.requested_at || test.created_at || new Date().toISOString()
-      const expires = test.expires_at || test.failed_at || created
+      const expires = new Date(new Date(created).getTime() + 75 * 60 * 1000).toISOString()
       const rawCode = test.device_key || test.provider_code || test.id
       const legacy = test.legacy_metadata || {}
       const metadataUsername = typeof legacy.xtream_username === 'string' ? legacy.xtream_username : ''
@@ -104,8 +114,9 @@ export async function getTestsData(): Promise<TestsQueryResult> {
         senha: maskPassword(account?.password_secret || metadataPassword || 'senha'),
         codigo: maskDeviceKey(rawCode) || codeFromSeed(test.id),
         m3u: account?.m3u_url_secret ? maskUrl(account.m3u_url_secret) : account?.hls_url_secret ? maskUrl(account.hls_url_secret) : metadataM3u ? maskUrl(metadataM3u) : metadataHls ? maskUrl(metadataHls) : undefined,
-        status: mapStatus(test.status),
+        status: mapOperationalStatus(test.status, expires),
         validade: `${formatDateBR(expires)} ${new Date(expires).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`,
+        expiresAt: expires,
         criadoEm: formatDateBR(created),
         horario: new Date(created).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
       }

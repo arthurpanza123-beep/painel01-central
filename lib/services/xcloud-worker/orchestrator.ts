@@ -346,6 +346,14 @@ export async function runXcloudWorker(input: XcloudWorkerInput): Promise<XcloudW
         if (!input.retry_stage || input.retry_stage === 'FindXcloudDevice') {
           currentStage = 'FindXcloudDevice'
           await updateTestMetadata(test, { status: 'running', stage: currentStage, recreate_device: workerMode === 'recreate_device', remove_device: workerMode === 'remove_device' })
+          if (workerMode === 'remove_device') {
+            await writeLog('XCLOUD_DEVICE_REMOVAL_STARTED', 'info', {
+              client_id: test.client_id,
+              test_id: test.test_id,
+              message: 'Remocao da device XCloud iniciada.',
+              metadata: { device_key: test.device_key, mode: workerMode },
+            })
+          }
           const findResult = await withRetries(cfg.maxRetries, () => findXcloudDevice(page, cfg, test.device_key))
           deviceFound = findResult.device_found
           await writeLog('XCLOUD_DEVICE_FOUND', deviceFound ? 'success' : 'warning', {
@@ -428,6 +436,12 @@ export async function runXcloudWorker(input: XcloudWorkerInput): Promise<XcloudW
             message: deviceFound ? 'Device XCloud removida.' : 'Device XCloud nao estava presente; remocao considerada concluida.',
             metadata: { device_key: test.device_key, device_found: deviceFound, device_deleted: deviceDeleted },
           })
+          await writeLog('XCLOUD_DEVICE_REMOVAL_COMPLETED', 'success', {
+            client_id: test.client_id,
+            test_id: test.test_id,
+            message: 'Remocao da device XCloud concluida.',
+            metadata: { device_key: test.device_key, device_found: deviceFound, device_deactivated: deviceDeactivated, device_deleted: deviceDeleted, device_removed: deviceRemoved },
+          })
           return {
             status: 'success',
             stage: 'Completed',
@@ -486,6 +500,12 @@ export async function runXcloudWorker(input: XcloudWorkerInput): Promise<XcloudW
 
       currentStage = 'AttachXtreamCredentials'
       await updateTestMetadata(test, { status: 'running', stage: currentStage, device_added: true })
+      await writeLog('XCLOUD_XTREAM_ATTACH_STARTED', 'info', {
+        client_id: test.client_id,
+        test_id: test.test_id,
+        message: 'Vinculo Xtream iniciado na device XCloud.',
+        metadata: { device_key: test.device_key },
+      })
       const attachResult = await withRetries(cfg.maxRetries, () => attachXtreamCredentials(page, cfg, {
         deviceKey: test.device_key,
         host: test.host,
@@ -495,14 +515,12 @@ export async function runXcloudWorker(input: XcloudWorkerInput): Promise<XcloudW
       xtreamAttached = attachResult.xtream_attached
       confirmationFound = attachResult.confirmation_found
 
-      if (workerMode === 'recreate_device') {
-        await writeLog('XCLOUD_XTREAM_ATTACHED', 'success', {
-          client_id: test.client_id,
-          test_id: test.test_id,
-          message: 'Xtream vinculado na device XCloud recriada.',
-          metadata: { device_key: test.device_key, confirmation_found: confirmationFound },
-        })
-      }
+      await writeLog('XCLOUD_XTREAM_ATTACHED', 'success', {
+        client_id: test.client_id,
+        test_id: test.test_id,
+        message: workerMode === 'recreate_device' ? 'Xtream vinculado na device XCloud recriada.' : 'Xtream vinculado na device XCloud.',
+        metadata: { device_key: test.device_key, confirmation_found: confirmationFound },
+      })
 
       await updateTestMetadata(test, {
         status: 'success',

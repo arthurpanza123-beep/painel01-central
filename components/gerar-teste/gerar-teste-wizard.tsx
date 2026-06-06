@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   Copy, CheckCircle, ArrowRight, ArrowLeft,
   RotateCcw, Zap, Server, User, Phone, ChevronDown,
-  ExternalLink, PlayCircle, FileText
+  ExternalLink, PlayCircle, FileText, X
 } from 'lucide-react'
 import { useToast } from '@/components/ui/toast'
 import { cn } from '@/lib/utils'
@@ -15,6 +15,8 @@ import { cn } from '@/lib/utils'
 // ----------------------------------------------------------------
 type WizardStep = 1 | 2 | 3 | 4
 type ProcessStep = 'gerando' | 'sucesso'
+type GenerationStepStatus = 'pending' | 'running' | 'done' | 'failed'
+type GenerationProgressStep = { id: string; label: string; status: GenerationStepStatus }
 
 interface FormData {
   nome: string
@@ -126,12 +128,18 @@ const SERVIDORES = [
 // Etapas de geração mais detalhadas (melhoria #7)
 const ETAPAS_GERACAO = [
   { id: 'validando',   label: 'Validando cliente' },
-  { id: 'playlist',   label: 'Obtendo playlist' },
-  { id: 'dispositivo', label: 'Criando dispositivo' },
-  { id: 'servidor',   label: 'Vinculando servidor' },
-  { id: 'ativando',   label: 'Ativando acesso' },
-  { id: 'enviando',   label: 'Enviando dados' },
+  { id: 'acesso',      label: 'Gerando acesso' },
+  { id: 'playlist',    label: 'Obtendo playlist' },
+  { id: 'dispositivo', label: 'Criando device XCloud' },
+  { id: 'servidor',    label: 'Vinculando servidor Xtream' },
+  { id: 'reload',      label: 'Confirmando RELOAD' },
+  { id: 'mensagem',    label: 'Preparando mensagem' },
+  { id: 'concluido',   label: 'Concluído' },
 ]
+
+function initialGenerationSteps(): GenerationProgressStep[] {
+  return ETAPAS_GERACAO.map((step, index) => ({ ...step, status: index === 0 ? 'running' : 'pending' }))
+}
 
 // ----------------------------------------------------------------
 // Helpers
@@ -183,7 +191,7 @@ function pendingXcloudWorker(): TesteGerado['xcloudWorker'] {
     device_added: false,
     xtream_attached: false,
     confirmation_found: false,
-    message: 'Acesso Yellow gerado. Execute o XCloud real quando estiver pronto.',
+    message: 'Worker XCloud aguardando fallback manual.',
   }
 }
 
@@ -328,8 +336,7 @@ export function GerarTesteWizard() {
   const [wizardStep, setWizardStep] = useState<WizardStep>(1)
   const [processStep, setProcessStep] = useState<ProcessStep | null>(null)
   const [form, setForm] = useState<FormData>({ nome: '', telefone: '', app: '', servidor: '', deviceKey: '' })
-  const [etapaAtual, setEtapaAtual] = useState(0)
-  const [etapasFeitas, setEtapasFeitas] = useState<Set<number>>(new Set())
+  const [generationSteps, setGenerationSteps] = useState<GenerationProgressStep[]>(initialGenerationSteps)
   const [teste, setTeste] = useState<TesteGerado | null>(null)
   const [copied, setCopied] = useState(false)
   const [mostrarServidores, setMostrarServidores] = useState(false)
@@ -351,20 +358,10 @@ export function GerarTesteWizard() {
 
   useEffect(() => {
     if (processStep !== 'gerando') return
-    setEtapaAtual(0)
-    setEtapasFeitas(new Set())
+    let alive = true
+    const operatorRef = `w${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
+    setGenerationSteps(initialGenerationSteps())
 
-    // Avança as etapas visuais da animação independente do fetch
-    const timers: ReturnType<typeof setTimeout>[] = []
-    ETAPAS_GERACAO.forEach((_, i) => {
-      timers.push(setTimeout(() => {
-        setEtapaAtual(i)
-        setEtapasFeitas((prev) => new Set([...prev, i]))
-      }, i * 650))
-    })
-
-    // Chama o endpoint — aguarda o tempo mínimo da animação
-    const minDelay = ETAPAS_GERACAO.length * 650 + 400
     const fetchTeste = async (): Promise<TesteGerado | null> => {
       try {
         const res = await fetch('/api/tests/create', {
@@ -376,13 +373,14 @@ export function GerarTesteWizard() {
             app_key: form.app,
             panel_key: form.servidor,
             device_key: form.app === 'xcloud' ? form.deviceKey : undefined,
+            operator_ref: operatorRef,
           }),
         })
         const data = await res.json()
         if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`)
         if (!data.success) throw new Error(data.error ?? 'Erro desconhecido')
         const xcloudWorker: TesteGerado['xcloudWorker'] | undefined = form.app === 'xcloud' && data.test.id
-          ? pendingXcloudWorker()
+          ? normalizeXcloudWorker(data.test.xcloud_worker, 'Completed') || pendingXcloudWorker()
           : undefined
 
         return {
@@ -407,18 +405,38 @@ export function GerarTesteWizard() {
       }
     }
 
-    // Aguarda o mínimo da animação antes de exibir sucesso
-    timers.push(setTimeout(async () => {
+    const pollProgress = async () => {
+      try {
+        const res = await fetch(`/api/tests/create/progress?operator_ref=${encodeURIComponent(operatorRef)}`, { cache: 'no-store' })
+        const data = await res.json().catch(() => null)
+        if (!alive || !data?.ok || !Array.isArray(data.steps)) return
+        setGenerationSteps(data.steps)
+      } catch {
+        // The create request remains authoritative; polling is only for UI progress.
+      }
+    }
+
+    const interval = setInterval(pollProgress, 1000)
+    pollProgress()
+
+    ;(async () => {
       const resultado = await fetchTeste()
+      await pollProgress()
+      clearInterval(interval)
+      if (!alive) return
       if (!resultado) {
         setProcessStep(null)
         return
       }
+      setGenerationSteps(ETAPAS_GERACAO.map((step) => ({ ...step, status: 'done' })))
       setTeste(resultado)
       setProcessStep('sucesso')
-    }, minDelay))
+    })()
 
-    return () => timers.forEach(clearTimeout)
+    return () => {
+      alive = false
+      clearInterval(interval)
+    }
   }, [processStep, form])
 
   const canProceed = (step: WizardStep): boolean => {
@@ -485,10 +503,40 @@ export function GerarTesteWizard() {
     window.open(`https://painel2.centralplayplus.com.br?${params.toString()}`, '_blank')
   }
 
-  const handleConcluir = () => {
-    handleAbrirPainel2()
-    addToast('success', 'Contexto enviado para o Painel 2')
-    handleNovoTeste()
+  const handleConcluir = async () => {
+    if (!teste?.id) return
+    try {
+      const res = await fetch('/api/flows/dispatch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          flow: 'test_created',
+          phone: form.telefone,
+          client: { name: form.nome, phone: form.telefone },
+          test: {
+            id: teste.id,
+            app: APPS.find((item) => item.id === form.app)?.label || form.app,
+            panel: SERVIDORES.find((item) => item.id === form.servidor)?.label || form.servidor,
+            pedido: teste.pedido,
+            host: teste.host,
+            username: teste.usuario,
+            password: teste.senha,
+            code: teste.codigo,
+          },
+          context: {
+            source: 'painel1',
+            operator_ref: 'painel_web',
+            test_id: teste.id,
+          },
+        }),
+      })
+      const data = await res.json().catch(() => null)
+      if (!res.ok || data?.ok === false) throw new Error(data?.message || data?.error || `HTTP ${res.status}`)
+      addToast('success', data?.dryRun ? 'Preview gerado no Painel 2 (dry-run: WhatsApp não enviado)' : `Mensagem de teste enviada (${data?.code || 'SENT'})`)
+      handleNovoTeste()
+    } catch (err) {
+      addToast('error', err instanceof Error ? err.message : 'Falha ao disparar flow no Painel 2')
+    }
   }
 
   const handleAtivarCliente = () => {
@@ -612,6 +660,7 @@ export function GerarTesteWizard() {
     setWizardStep(1)
     setDirection(1)
     setForm({ nome: '', telefone: '', app: '', servidor: '', deviceKey: '' })
+    setGenerationSteps(initialGenerationSteps())
     setTeste(null)
     setCopied(false)
     setMostrarServidores(false)
@@ -634,7 +683,7 @@ export function GerarTesteWizard() {
               className="fixed inset-0 z-50 flex items-center justify-center p-4"
               style={{ background: 'rgba(7,10,18,0.97)' }}
             >
-              <TelaGerando etapaAtual={etapaAtual} etapasFeitas={etapasFeitas} form={form} />
+              <TelaGerando steps={generationSteps} form={form} />
             </motion.div>
           )}
           {processStep === 'sucesso' && teste && (
@@ -1129,12 +1178,10 @@ function StepConfirmar({
 // Tela Gerando — melhoria #7: 6 etapas detalhadas
 // ----------------------------------------------------------------
 function TelaGerando({
-  etapaAtual,
-  etapasFeitas,
+  steps,
   form,
 }: {
-  etapaAtual: number
-  etapasFeitas: Set<number>
+  steps: GenerationProgressStep[]
   form: FormData
 }) {
   const servidorSelecionado = SERVIDORES.find((s) => s.id === form.servidor)
@@ -1182,7 +1229,7 @@ function TelaGerando({
         {isXCloud && (
           <div className="mb-4 inline-flex items-center gap-2 rounded-full px-4 py-2" style={{ background: 'rgba(20,184,166,0.15)', border: '1px solid rgba(20,184,166,0.3)' }}>
             <span className="h-2 w-2 rounded-full animate-pulse" style={{ background: '#14b8a6' }} />
-            <span className="text-sm font-semibold" style={{ color: '#5eead4' }}>XCloud preparado para ativacao real por botao</span>
+            <span className="text-sm font-semibold" style={{ color: '#5eead4' }}>XCloud em ativação real automática</span>
           </div>
         )}
 
@@ -1197,10 +1244,11 @@ function TelaGerando({
       </motion.div>
 
       <div className="space-y-2">
-        {ETAPAS_GERACAO.map((etapa, i) => {
-          const feita = etapasFeitas.has(i)
-          const ativa = i === etapaAtual && !feita
-          const pendente = !feita && !ativa
+        {steps.map((etapa, i) => {
+          const feita = etapa.status === 'done'
+          const ativa = etapa.status === 'running'
+          const falhou = etapa.status === 'failed'
+          const pendente = etapa.status === 'pending'
 
           return (
             <motion.div
@@ -1212,11 +1260,15 @@ function TelaGerando({
               style={{
                 background: ativa
                   ? 'rgba(37,99,235,0.12)'
+                  : falhou
+                    ? 'rgba(239,68,68,0.10)'
                   : feita
                     ? 'rgba(34,197,94,0.08)'
                     : 'rgba(255,255,255,0.02)',
                 border: ativa
                   ? '1px solid rgba(37,99,235,0.25)'
+                  : falhou
+                    ? '1px solid rgba(239,68,68,0.25)'
                   : feita
                     ? '1px solid rgba(34,197,94,0.15)'
                     : '1px solid rgba(255,255,255,0.04)',
@@ -1227,11 +1279,15 @@ function TelaGerando({
                 style={{
                   background: feita
                     ? '#22c55e'
+                    : falhou
+                      ? '#ef4444'
                     : ativa
                       ? 'rgba(37,99,235,0.25)'
                       : 'rgba(255,255,255,0.04)',
                   boxShadow: feita
                     ? '0 0 16px rgba(34,197,94,0.5)'
+                    : falhou
+                      ? '0 0 16px rgba(239,68,68,0.35)'
                     : ativa
                       ? '0 0 16px rgba(59,130,246,0.4)'
                       : 'none',
@@ -1239,6 +1295,8 @@ function TelaGerando({
               >
                 {feita ? (
                   <CheckCircle className="h-5 w-5 text-white" strokeWidth={3} />
+                ) : falhou ? (
+                  <X className="h-5 w-5 text-white" strokeWidth={3} />
                 ) : ativa ? (
                   <div className="h-2.5 w-2.5 animate-pulse rounded-full bg-blue-400" />
                 ) : (
@@ -1248,12 +1306,13 @@ function TelaGerando({
 
               <span
                 className="flex-1 text-sm font-medium transition-all duration-300"
-                style={{ color: feita ? '#86efac' : ativa ? '#93c5fd' : '#475569' }}
+                style={{ color: feita ? '#86efac' : falhou ? '#f87171' : ativa ? '#93c5fd' : '#475569' }}
               >
                 {etapa.label}
               </span>
 
               {feita && <span className="text-[11px] font-bold text-emerald-400">✓</span>}
+              {falhou && <span className="text-[11px] font-bold text-red-300">falhou</span>}
               {ativa && (
                 <div
                   className="h-4 w-4 rounded-full border-2 animate-spin"

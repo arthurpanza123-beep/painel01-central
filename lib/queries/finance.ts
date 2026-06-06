@@ -1,4 +1,5 @@
 import { MOCK_CLIENTES, MOCK_CREDITOS, type CreditoPainel } from '@/lib/mock-data'
+import { isOperationalNoise, operationWindows } from '@/lib/services/operational-window'
 import { getSupabaseServerClient, isSupabaseServerConfigured } from '@/lib/supabase/server'
 
 export type FinanceQueryResult = {
@@ -50,7 +51,7 @@ function latestRenewalsByClient(renewals: RenewalRow[]): Map<string, RenewalRow>
 }
 
 function isTemporaryClient(client: ClientRow): boolean {
-  return /worker|codex|teste e2e/i.test(String(client.name || ''))
+  return isOperationalNoise(client.name)
 }
 
 function isMonthlyPlan(planKey?: string | null): boolean {
@@ -79,6 +80,11 @@ function calculateMonthlyRenewalForecast(clients: ClientRow[], renewals: Renewal
   }
 
   return { total, counted, outside, byPlan }
+}
+
+function yellowBoxOperationalCredits(): number {
+  const parsed = Number(process.env.YELLOW_BOX_CREDITS || process.env.BRASIL_YELLOW_CREDITS || 9)
+  return Number.isFinite(parsed) ? parsed : 9
 }
 
 function buildMockResult(): FinanceQueryResult {
@@ -122,11 +128,9 @@ export async function getFinanceData(): Promise<FinanceQueryResult> {
 
   try {
     const now = new Date()
+    const windows = operationWindows(now)
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString()
-    const in30 = new Date(now.getTime() + 30 * 86400000).toISOString()
-    const in60 = new Date(now.getTime() + 60 * 86400000).toISOString()
-    const in90 = new Date(now.getTime() + 90 * 86400000).toISOString()
+    const todayStart = windows.todayStartIso
 
     const [clientsRes, renewalsRes, paymentsRes, testsRes, creditsRes, panelsRes] = await Promise.all([
       db.from('clients').select('id,name,status'),
@@ -166,11 +170,22 @@ export async function getFinanceData(): Promise<FinanceQueryResult> {
         alertaBaixo: credit.status !== 'ok' || saldo <= Math.max(custo * 5, 50),
       }
     })
+    if (!creditos.length) {
+      const saldo = yellowBoxOperationalCredits()
+      creditos.push({
+        id: 'brasil_yellow_operational_balance',
+        painel: 'Brasil / Yellow Box',
+        saldo,
+        custoPorAtivacao: 1,
+        ativacoesRestantes: saldo,
+        alertaBaixo: saldo <= 5,
+      })
+    }
 
     const paidPayments = payments.filter((p) => p.status === 'paid')
     const receitaMesAtual = paidPayments.reduce((acc, p) => acc + money(p.amount_cents), 0)
     const dueForecast = (until: string) => renewals
-      .filter((r) => r.status !== 'paid' && r.status !== 'cancelled' && r.due_at && r.due_at >= now.toISOString() && r.due_at <= until)
+      .filter((r) => !['paid', 'cancelled'].includes(String(r.status || '')) && r.due_at && r.due_at >= now.toISOString() && r.due_at <= until)
       .reduce((acc, r) => acc + money(r.amount_cents), 0)
     const monthlyForecast = calculateMonthlyRenewalForecast(clients, renewals)
     const porPlanoMap = Object.fromEntries(monthlyForecast.byPlan)
@@ -181,7 +196,9 @@ export async function getFinanceData(): Promise<FinanceQueryResult> {
     const creditosDisponiveis = creditos.reduce((acc, c) => acc + c.saldo, 0)
     const custoEstimado = creditos.reduce((acc, c) => acc + c.custoPorAtivacao * 5, 0)
     const renovacaoMensalPrevista = Number(monthlyForecast.total.toFixed(2))
-    const receitaVencimento30d = dueForecast(in30)
+    const receitaVencimento30d = dueForecast(windows.in30dIso)
+    const receitaVencimento60d = dueForecast(windows.in60dIso)
+    const receitaVencimento90d = dueForecast(windows.in90dIso)
 
     return {
       data_source: 'supabase',
@@ -189,9 +206,9 @@ export async function getFinanceData(): Promise<FinanceQueryResult> {
         receitaMesAtual,
         renovacaoMensalPrevista,
         receitaVencimento30d,
-        receitaPrevista30d: renovacaoMensalPrevista,
-        receitaPrevista60d: Number((renovacaoMensalPrevista * 2).toFixed(2)),
-        receitaPrevista90d: Number((renovacaoMensalPrevista * 3).toFixed(2)),
+        receitaPrevista30d: Number(receitaVencimento30d.toFixed(2)),
+        receitaPrevista60d: Number(receitaVencimento60d.toFixed(2)),
+        receitaPrevista90d: Number(receitaVencimento90d.toFixed(2)),
         lucroEstimado: renovacaoMensalPrevista - custoEstimado,
         renovacoesPrevistas: monthlyForecast.counted,
         creditosDisponiveis,

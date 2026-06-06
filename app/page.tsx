@@ -35,6 +35,12 @@ export default function App() {
   const [page, setPage] = useState<NavPage>('dashboard')
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const section = params.get('section')
+    if (section === 'tests' || section === 'testes') setPage('testes')
+  }, [])
+
+  useEffect(() => {
     const onNavigate = (event: Event) => {
       const detail = (event as CustomEvent<{ page?: NavPage }>).detail
       if (detail?.page) setPage(detail.page)

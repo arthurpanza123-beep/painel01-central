@@ -3,6 +3,7 @@ import crypto from 'crypto'
 import { MOCK_CONTAS, type Conta } from '@/lib/mock-data'
 import { maskPassword, maskPhone, maskUsername } from '@/lib/services/masking'
 import { formatDateBR } from '@/lib/services/date-normalizer'
+import { operationWindows } from '@/lib/services/operational-window'
 import { getSupabaseServerClient, isSupabaseServerConfigured } from '@/lib/supabase/server'
 
 export type AccountsQueryResult = {
@@ -25,6 +26,7 @@ type AccountRow = {
   panel_external_id: string | null
   app_id: string | null
   panel_id: string | null
+  created_at: string | null
 }
 type SlotRow = { id: string; account_id: string; client_id: string | null; slot_number: number; status: string | null; assigned_at: string | null }
 type AppRow = { id: string; name: string; key: string }
@@ -68,7 +70,7 @@ export async function getAccountsData(): Promise<AccountsQueryResult> {
 
   try {
     const [accountsRes, slotsRes, clientsRes, appsRes, panelsRes] = await Promise.all([
-      db.from('accounts').select('id,client_id,username,password_secret,max_slots,status,activated_at,expires_at,provider,provider_code,panel_external_id,app_id,panel_id').order('created_at', { ascending: true }),
+      db.from('accounts').select('id,client_id,username,password_secret,max_slots,status,activated_at,expires_at,provider,provider_code,panel_external_id,app_id,panel_id,created_at').order('created_at', { ascending: true }),
       db.from('account_slots').select('id,account_id,client_id,slot_number,status,assigned_at').order('slot_number', { ascending: true }),
       db.from('clients').select('id,name,phone_e164,created_at'),
       db.from('apps').select('id,name,key'),
@@ -91,7 +93,8 @@ export async function getAccountsData(): Promise<AccountsQueryResult> {
       slotsByAccountId.set(slot.account_id, list)
     }
 
-    const items: Conta[] = (accountsRes.data as AccountRow[] || []).map((account) => {
+    const todayStart = operationWindows().todayStartIso
+    const mapped = (accountsRes.data as AccountRow[] || []).map((account) => {
       const linkedSlots = slotsByAccountId.get(account.id) || []
       const occupiedSlots = linkedSlots.filter((slot) => String(slot.status || '').toLowerCase() === 'occupied' || slot.client_id)
       const panel = account.panel_id ? panelsById.get(account.panel_id) : undefined
@@ -123,6 +126,23 @@ export async function getAccountsData(): Promise<AccountsQueryResult> {
         }),
       }
     })
+
+    const freeToday = mapped
+      .filter((item) => item.clientesVinculados.length < item.vagasTotal)
+      .filter((item) => {
+        const account = (accountsRes.data as AccountRow[] || []).find((row) => row.id === item.id)
+        return String(account?.created_at || account?.activated_at || '') >= todayStart
+      })
+      .sort((a, b) => {
+        const accountA = (accountsRes.data as AccountRow[] || []).find((row) => row.id === a.id)
+        const accountB = (accountsRes.data as AccountRow[] || []).find((row) => row.id === b.id)
+        return String(accountB?.created_at || accountB?.activated_at || '').localeCompare(String(accountA?.created_at || accountA?.activated_at || ''))
+      })[0]
+
+    const fullGroups = mapped.filter((item) => item.vagasTotal >= 2 && item.clientesVinculados.length >= 2)
+    const items = freeToday && !fullGroups.some((item) => item.id === freeToday.id)
+      ? [freeToday, ...fullGroups]
+      : fullGroups
 
     return { data_source: 'supabase', items }
   } catch {

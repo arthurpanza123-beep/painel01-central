@@ -137,6 +137,8 @@ function CodexModal({
   onSend: (obs: string) => void
 }) {
   const [obs, setObs] = useState('')
+  const [phase, setPhase] = useState<'compose' | 'review' | 'running' | 'done'>('compose')
+  const [runStep, setRunStep] = useState(0)
   const sev = severidade(problema.tipo)
   const tipoLabel = TIPOS_PROBLEMA.find((t) => t.id === problema.tipo)?.label || problema.tipo
 
@@ -147,6 +149,28 @@ servidor: ${problema.servidor}
 erro: ${tipoLabel} — ${problema.descricao}
 severidade: ${sev.label}
 data/hora: ${problema.criadoEm}${obs ? `\nobservacao: ${obs}` : ''}`
+
+  const sugestao = [
+    `Entendimento: analisar ${tipoLabel.toLowerCase()} para ${problema.cliente} no app ${problema.app}.`,
+    `Prioridade sugerida: ${sev.label}.`,
+    'Acao proposta: abrir uma execucao controlada com contexto da tela, preservar envio manual e registrar o resultado antes de qualquer mudanca operacional.',
+  ]
+
+  const runLabels = ['Codex analisando', 'Codex preparando alteração', 'Codex executando', 'Concluído']
+
+  useEffect(() => {
+    if (phase !== 'running') return
+    setRunStep(0)
+    const timers = runLabels.map((_, index) => setTimeout(() => setRunStep(index), index * 850))
+    const done = setTimeout(() => {
+      setPhase('done')
+      setRunStep(runLabels.length - 1)
+    }, runLabels.length * 850)
+    return () => {
+      timers.forEach(clearTimeout)
+      clearTimeout(done)
+    }
+  }, [phase])
 
   return (
     <motion.div
@@ -167,8 +191,8 @@ data/hora: ${problema.criadoEm}${obs ? `\nobservacao: ${obs}` : ''}`
               <Cpu className="h-5 w-5" />
             </div>
             <div>
-              <h3 className="text-base font-semibold text-white" style={{ fontFamily: 'var(--font-display)' }}>Enviar para Codex</h3>
-              <p className="text-xs text-slate-500">Quer acrescentar mais algum detalhe antes de enviar?</p>
+              <h3 className="text-base font-semibold text-white" style={{ fontFamily: 'var(--font-display)' }}>Codex IA</h3>
+              <p className="text-xs text-slate-500">Assistente operacional com confirmação antes de executar</p>
             </div>
           </div>
           <button onClick={onClose} className="h-8 w-8 rounded-lg flex items-center justify-center text-slate-500 hover:text-white">
@@ -177,18 +201,38 @@ data/hora: ${problema.criadoEm}${obs ? `\nobservacao: ${obs}` : ''}`
         </div>
 
         <div className="p-5 space-y-4">
-          <div>
-            <label className="text-[11px] text-slate-500 uppercase tracking-wider mb-1.5 block">Observacao adicional</label>
-            <textarea
-              autoFocus
-              value={obs}
-              onChange={(e) => setObs(e.target.value)}
-              rows={3}
-              placeholder="Ex: cliente ja reinstalou o app, problema persiste apos renovacao..."
-              className="w-full p-3 rounded-lg text-sm text-white placeholder:text-slate-600 outline-none resize-none"
-              style={{ background: 'var(--input)', border: '1px solid var(--border)' }}
-            />
-          </div>
+          {phase === 'compose' && (
+            <div>
+              <label className="text-[11px] text-slate-500 uppercase tracking-wider mb-1.5 block">O que você quer alterar ou investigar?</label>
+              <textarea
+                autoFocus
+                value={obs}
+                onChange={(e) => setObs(e.target.value)}
+                rows={4}
+                placeholder="Ex: cliente ja reinstalou o app, problema persiste apos renovacao..."
+                className="w-full p-3 rounded-lg text-sm text-white placeholder:text-slate-600 outline-none resize-none"
+                style={{ background: 'var(--input)', border: '1px solid var(--border)' }}
+              />
+            </div>
+          )}
+          {phase === 'review' && (
+            <div className="rounded-xl p-4" style={{ background: 'rgba(167,139,250,0.08)', border: '1px solid rgba(167,139,250,0.2)' }}>
+              <p className="mb-3 text-xs font-semibold uppercase tracking-wider" style={{ color: '#c4b5fd' }}>Resposta do Codex</p>
+              <div className="space-y-2">
+                {sugestao.map((line) => <p key={line} className="text-sm text-slate-200">{line}</p>)}
+              </div>
+            </div>
+          )}
+          {(phase === 'running' || phase === 'done') && (
+            <div className="space-y-2">
+              {runLabels.map((label, index) => (
+                <div key={label} className="flex items-center gap-3 rounded-lg p-3" style={{ background: index <= runStep ? 'rgba(34,197,94,0.08)' : 'rgba(255,255,255,0.03)', border: '1px solid var(--border)' }}>
+                  <span className="h-2 w-2 rounded-full" style={{ background: index <= runStep ? '#22c55e' : '#334155' }} />
+                  <span className="text-sm text-slate-200">{label}</span>
+                </div>
+              ))}
+            </div>
+          )}
           <div>
             <label className="text-[11px] text-slate-500 uppercase tracking-wider mb-1.5 block">Contexto que sera enviado</label>
             <pre className="p-3 rounded-lg text-[11px] leading-relaxed font-mono whitespace-pre-wrap" style={{ background: 'rgba(0,0,0,0.3)', color: '#94a3b8', border: '1px solid var(--border)' }}>
@@ -198,13 +242,15 @@ data/hora: ${problema.criadoEm}${obs ? `\nobservacao: ${obs}` : ''}`
         </div>
 
         <div className="p-5 flex gap-2" style={{ borderTop: '1px solid var(--border)' }}>
-          <button
-            onClick={() => onSend(obs)}
+          {phase === 'compose' && <button
+            onClick={() => setPhase('review')}
             className="flex-1 h-10 rounded-xl text-sm font-semibold flex items-center justify-center gap-2"
             style={{ background: '#a78bfa', color: '#1a0b2e' }}
           >
-            <Send className="h-4 w-4" /> Enviar contexto ao Codex
-          </button>
+            <Send className="h-4 w-4" /> Analisar com Codex
+          </button>}
+          {phase === 'review' && <button onClick={() => setPhase('running')} className="flex-1 h-10 rounded-xl text-sm font-semibold" style={{ background: '#22c55e', color: '#052e16' }}>Confirmar execução</button>}
+          {phase === 'done' && <button onClick={() => onSend(obs)} className="flex-1 h-10 rounded-xl text-sm font-semibold" style={{ background: '#22c55e', color: '#052e16' }}>Finalizar</button>}
           <button onClick={onClose} className="h-10 px-4 rounded-xl text-sm font-medium" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', color: '#94a3b8' }}>
             Cancelar
           </button>

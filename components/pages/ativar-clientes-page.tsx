@@ -20,6 +20,10 @@ type Recommendation = {
   requires_new_account: boolean
   app_id: string | null
   panel_id: string | null
+  app_key: string | null
+  panel_key: string | null
+  app_name: string | null
+  panel_name: string | null
 }
 
 const APPS = [
@@ -68,6 +72,8 @@ export function AtivarClientesPage() {
   const [panelKey, setPanelKey] = useState('yellow')
   const [planKey, setPlanKey] = useState('mensal')
   const [recommendation, setRecommendation] = useState<Recommendation | null>(null)
+  const [recommendationAttempted, setRecommendationAttempted] = useState(false)
+  const [recommendationError, setRecommendationError] = useState('')
   const [loadingRecommendation, setLoadingRecommendation] = useState(false)
   const [ativando, setAtivando] = useState(false)
   const { addToast } = useToast()
@@ -106,9 +112,11 @@ export function AtivarClientesPage() {
   const providerPanelUrl = getProviderPanelUrl(providerLookup)
   const compatibleApps = listCompatibleApps(providerLookup).slice(0, 8)
 
-  async function carregarRecomendacao(nextApp = appKey, nextPanel = panelKey) {
+  async function carregarRecomendacao(nextApp = appKey, nextPanel = panelKey): Promise<Recommendation | null> {
     setRecommendation(null)
-    if (!clienteSelecionado?.id) return
+    setRecommendationError('')
+    setRecommendationAttempted(true)
+    if (!clienteSelecionado?.id) return null
     setLoadingRecommendation(true)
     try {
       const params = new URLSearchParams({
@@ -121,9 +129,13 @@ export function AtivarClientesPage() {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || data.message || `HTTP ${res.status}`)
       setRecommendation(data)
+      return data as Recommendation
     } catch (err) {
       setRecommendation(null)
-      addToast('error', err instanceof Error ? err.message : 'Falha ao buscar recomendacao')
+      const message = err instanceof Error ? err.message : 'Falha ao buscar recomendacao'
+      setRecommendationError(message)
+      addToast('error', message)
+      return null
     } finally {
       setLoadingRecommendation(false)
     }
@@ -135,12 +147,18 @@ export function AtivarClientesPage() {
     setAppKey(appIdFromName(cliente.app) || 'xcloud')
     setPanelKey(panelIdFromName(cliente.servidor) || 'yellow')
     setPlanKey(planIdFromName(cliente.plano) || 'mensal')
+    setRecommendation(null)
+    setRecommendationAttempted(false)
+    setRecommendationError('')
     setStep('app_plano')
   }
 
   function criarNovo() {
     setClienteSelecionado(null)
     setNovoCliente({ name: search, phone: '' })
+    setRecommendation(null)
+    setRecommendationAttempted(false)
+    setRecommendationError('')
     setStep('app_plano')
   }
 
@@ -149,11 +167,23 @@ export function AtivarClientesPage() {
       addToast('error', 'Informe nome e telefone do cliente')
       return
     }
-    if (!recommendation) await carregarRecomendacao()
+    const loaded = recommendation || await carregarRecomendacao()
+    if (!loaded && clienteSelecionado?.id) {
+      setStep('confirmar')
+      return
+    }
     setStep('confirmar')
   }
 
   async function ativarCliente() {
+    if (clienteSelecionado?.id && !recommendation) {
+      addToast('error', 'Busque uma recomendacao de tela antes de confirmar a ativacao real')
+      return
+    }
+    if (recommendation?.requires_new_account) {
+      addToast('error', 'Nenhuma tela livre encontrada para este painel/app. Crie uma nova conta ou escolha outro painel.')
+      return
+    }
     setAtivando(true)
     try {
       const res = await fetch('/api/activations', {
@@ -161,8 +191,10 @@ export function AtivarClientesPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...(clienteSelecionado?.id ? { client_id: clienteSelecionado.id } : { client: { name: selectedClientName, phone: selectedClientPhone } }),
-          app_key: appKey,
-          panel_key: panelKey,
+          app_id: recommendation?.app_id || undefined,
+          panel_id: recommendation?.panel_id || undefined,
+          app_key: recommendation?.app_key || appKey,
+          panel_key: recommendation?.panel_key || panelKey,
           plan_key: planKey,
           amount: valorFinal,
           account_id: recommendation?.account_id || undefined,
@@ -174,17 +206,30 @@ export function AtivarClientesPage() {
       const data = await res.json().catch(() => null)
       if (!res.ok || !data?.success) throw new Error(data?.error || `HTTP ${res.status}`)
       addToast('success', 'Cliente ativado com sucesso')
-      const params = new URLSearchParams({
-        source: 'painel1',
-        flow: 'access_activated',
-        client_id: data.activation?.client_id || clienteSelecionado?.id || '',
-        client_name: selectedClientName,
-        app: APPS.find((item) => item.id === appKey)?.label || appKey,
-        panel: PAINEIS.find((item) => item.id === panelKey)?.label || panelKey,
-        plan: plano.label,
-        amount: String(valorFinal),
+      const flowRes = await fetch('/api/flows/dispatch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          flow: 'access_activated',
+          phone: selectedClientPhone,
+          client: { name: selectedClientName, phone: selectedClientPhone },
+          activation: {
+            app: APPS.find((item) => item.id === appKey)?.label || appKey,
+            panel: recommendation?.panel_name || PAINEIS.find((item) => item.id === panelKey)?.label || panelKey,
+            plan: plano.label,
+            amount: `R$ ${valorFinal.toFixed(2)}`,
+            dueAt: data.activation?.due_at || '',
+          },
+          context: {
+            source: 'painel1',
+            client_id: data.activation?.client_id || clienteSelecionado?.id || '',
+            operator_ref: 'painel_web',
+          },
+        }),
       })
-      window.open(`https://painel2.centralplayplus.com.br?${params.toString()}`, '_blank')
+      const flowData = await flowRes.json().catch(() => null)
+      if (!flowRes.ok || flowData?.ok === false) addToast('error', flowData?.message || 'Ativado, mas flow do Painel 2 falhou')
+      else addToast('success', flowData?.dryRun ? 'Mensagem de ativacao preparada em dry-run' : 'Mensagem de ativacao enviada')
       setStep('busca')
       setSearch('')
       setClienteSelecionado(null)
@@ -205,7 +250,7 @@ export function AtivarClientesPage() {
           <span className="text-xs text-slate-500 uppercase tracking-widest font-medium">Ativacao</span>
         </div>
         <h1 className="text-2xl font-bold text-white mb-2" style={{ fontFamily: 'var(--font-display)' }}>Ativar clientes</h1>
-        <p className="text-slate-500 text-sm">Ative clientes pagos usando vagas reais e slots disponiveis</p>
+        <p className="text-slate-500 text-sm">Ative clientes pagos usando telas reais disponiveis</p>
       </div>
 
       <div className="w-full max-w-2xl">
@@ -301,19 +346,25 @@ export function AtivarClientesPage() {
                   {providerPanelUrl && <Row label="Painel do provedor" value={providerPanelUrl} />}
                 </div>
               </Panel>
-              <Panel title="Recomendacao de vaga">
-                {loadingRecommendation ? <p className="text-sm text-slate-500">Buscando vaga livre...</p> : recommendation ? (
+              <Panel title="Recomendacao de tela">
+                {loadingRecommendation ? <p className="text-sm text-slate-500">Buscando tela livre...</p> : recommendationError ? (
+                  <p className="text-sm text-red-300">{recommendationError}</p>
+                ) : recommendation ? (
                   <div className="space-y-2">
                     <p className="text-sm font-semibold" style={{ color: recommendation.recommended ? '#4ade80' : '#fbbf24' }}>
-                      {recommendation.recommended ? 'Vaga livre encontrada' : 'Sem vaga livre compativel'}
+                      {recommendation.recommended ? 'Tela livre encontrada' : 'Sem tela livre compativel'}
                     </p>
                     <p className="text-xs text-slate-500">{recommendation.reason}</p>
                     {recommendation.recommended && <p className="text-xs text-emerald-300">Usar {recommendation.slot_label} em {recommendation.account_label}</p>}
                   </div>
-                ) : <p className="text-sm text-slate-500">Nenhuma recomendacao carregada.</p>}
+                ) : recommendationAttempted ? (
+                  <p className="text-sm text-slate-500">Nenhuma tela livre encontrada para este painel/app. Crie uma nova conta ou escolha outro painel.</p>
+                ) : (
+                  <p className="text-sm text-slate-500">A recomendacao sera buscada antes da ativacao.</p>
+                )}
               </Panel>
               <div className="grid gap-2 sm:grid-cols-2">
-                <button disabled={ativando} onClick={ativarCliente} className="h-12 rounded-xl text-sm font-semibold text-white disabled:opacity-60" style={{ background: '#22c55e' }}>
+                <button disabled={ativando || loadingRecommendation || Boolean(recommendationError) || Boolean(recommendation?.requires_new_account) || (clienteSelecionado?.id ? !recommendation : false)} onClick={ativarCliente} className="h-12 rounded-xl text-sm font-semibold text-white disabled:opacity-60" style={{ background: '#22c55e' }}>
                   {ativando ? 'Ativando...' : 'Confirmar ativacao real'}
                 </button>
                 <button onClick={() => setStep('app_plano')} className="h-12 rounded-xl text-sm font-medium text-slate-400" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>Voltar</button>

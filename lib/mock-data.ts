@@ -29,6 +29,7 @@ export interface Teste {
   m3u?: string
   status: StatusTeste
   validade: string
+  expiresAt?: string
   criadoEm: string
   horario: string
 }

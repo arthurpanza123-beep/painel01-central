@@ -3,8 +3,8 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-  TrendingUp, TestTube2, Search, Clock, Eye, Zap, ExternalLink,
-  AlertTriangle, Trash2, X
+  TestTube2, Search, Clock, Eye, Zap, ExternalLink,
+  AlertTriangle, Trash2, X, Loader2
 } from 'lucide-react'
 import {
   MOCK_TESTES,
@@ -25,16 +25,19 @@ function useCountdown(validade: string) {
 
   useEffect(() => {
     const calc = () => {
-      const parts = validade.split(' ')
-      const dateParts = parts[0].split('/')
-      const timeParts = parts[1] ? parts[1].split(':') : ['23', '59']
-      const target = new Date(
-        Number(dateParts[2]),
-        Number(dateParts[1]) - 1,
-        Number(dateParts[0]),
-        Number(timeParts[0]),
-        Number(timeParts[1])
-      )
+      const direct = new Date(validade)
+      const target = Number.isNaN(direct.getTime()) ? (() => {
+        const parts = validade.split(' ')
+        const dateParts = parts[0].split('/')
+        const timeParts = parts[1] ? parts[1].split(':') : ['23', '59']
+        return new Date(
+          Number(dateParts[2]),
+          Number(dateParts[1]) - 1,
+          Number(dateParts[0]),
+          Number(timeParts[0]),
+          Number(timeParts[1])
+        )
+      })() : direct
       const diff = target.getTime() - Date.now()
       if (diff <= 0) {
         setRemaining('Expirado')
@@ -70,17 +73,18 @@ const STATUS: Record<StatusTeste, { label: string; color: string }> = {
 
 // ——— Card de teste focado em countdown ———
 function TesteCard({
-  teste, onVerDetalhes, onConverter, onAtivar, onAbrirPainel2, onExpirar, onRemoverXCloud,
+  teste, onVerDetalhes, onAtivar, onAbrirPainel2, onExpirar, onRemoverXCloud, isExpiring, highlighted,
 }: {
   teste: Teste
   onVerDetalhes: () => void
-  onConverter: () => void
   onAtivar: () => void
   onAbrirPainel2: () => void
   onExpirar: () => void
   onRemoverXCloud: () => void
+  isExpiring?: boolean
+  highlighted?: boolean
 }) {
-  const { remaining, urgente, expirado, pct } = useCountdown(teste.validade)
+  const { remaining, urgente, expirado, pct } = useCountdown(teste.expiresAt || teste.validade)
   const cfg = STATUS[teste.status]
   const isAtivo = teste.status === 'ativo'
   const isExpirado = teste.status === 'expirado' || expirado
@@ -94,9 +98,12 @@ function TesteCard({
       className="group rounded-2xl p-5 transition-all relative overflow-hidden"
       style={{
         background: 'var(--card)',
-        border: isAtivo && urgente
+        border: highlighted
+          ? '1px solid rgba(96,165,250,0.8)'
+          : isAtivo && urgente
           ? '1px solid rgba(239,68,68,0.35)'
           : '1px solid var(--border)',
+        boxShadow: highlighted ? '0 0 0 3px rgba(96,165,250,0.16)' : undefined,
       }}
     >
       {isAtivo && urgente && (
@@ -175,23 +182,20 @@ function TesteCard({
             >
               <Eye className="h-3 w-3" /> Ver detalhes
             </button>
-            {(isAtivo || teste.status === 'sem_resposta') && !isExpirado && (
-              <button
-                onClick={onConverter}
-                className="h-7 px-3 rounded-lg text-[11px] font-medium flex items-center gap-1.5 transition-all"
-                style={{ background: 'rgba(245,158,11,0.1)', color: '#fbbf24', border: '1px solid rgba(245,158,11,0.2)' }}
-              >
-                <TrendingUp className="h-3 w-3" /> Converter
-              </button>
-            )}
             {teste.status === 'pago' && (
               <button onClick={onAtivar} className="h-7 px-3 rounded-lg text-[11px] font-medium flex items-center gap-1.5 transition-all" style={{ background: 'rgba(34,197,94,0.1)', color: '#4ade80', border: '1px solid rgba(34,197,94,0.2)' }}>
                 <Zap className="h-3 w-3" /> Ativar cliente
               </button>
             )}
             {(isAtivo || teste.status === 'sem_resposta') && (
-              <button onClick={onExpirar} className="h-7 px-3 rounded-lg text-[11px] font-medium flex items-center gap-1.5 transition-all" style={{ background: 'rgba(239,68,68,0.1)', color: '#f87171', border: '1px solid rgba(239,68,68,0.2)' }}>
-                <AlertTriangle className="h-3 w-3" /> Expirar teste
+              <button
+                onClick={onExpirar}
+                disabled={isExpiring}
+                className="h-7 px-3 rounded-lg text-[11px] font-medium flex items-center gap-1.5 transition-all disabled:cursor-not-allowed disabled:opacity-70"
+                style={{ background: 'rgba(239,68,68,0.1)', color: '#f87171', border: '1px solid rgba(239,68,68,0.2)' }}
+              >
+                {isExpiring ? <Loader2 className="h-3 w-3 animate-spin" /> : <AlertTriangle className="h-3 w-3" />}
+                {isExpiring ? 'Expirando...' : 'Expirar teste'}
               </button>
             )}
             {isExpirado && isXCloud && (
@@ -217,11 +221,24 @@ export function TestesPage() {
   const [dataSource, setDataSource] = useState<'mock' | 'supabase'>('mock')
   const [modalExpirar, setModalExpirar] = useState<Teste | null>(null)
   const [modalRemoverXCloud, setModalRemoverXCloud] = useState<Teste | null>(null)
+  const [expiringTestId, setExpiringTestId] = useState<string | null>(null)
+  const [blockedPanelUrl, setBlockedPanelUrl] = useState<string | null>(null)
   const [removendoXCloud, setRemovendoXCloud] = useState(false)
+  const [highlightedTestId, setHighlightedTestId] = useState<string | null>(null)
   const { addToast } = useToast()
+
+  const carregarTestes = async () => {
+    const res = await fetch('/api/tests', { cache: 'no-store' })
+    if (!res.ok) throw new Error('Falha ao carregar testes')
+    const payload = await res.json()
+    setTestes(Array.isArray(payload.items) ? payload.items : MOCK_TESTES)
+    setDataSource(payload.data_source === 'supabase' ? 'supabase' : 'mock')
+  }
 
   useEffect(() => {
     let alive = true
+    const params = new URLSearchParams(window.location.search)
+    const urlTestId = params.get('test_id') || ''
     async function load() {
       try {
         const res = await fetch('/api/tests', { cache: 'no-store' })
@@ -230,6 +247,11 @@ export function TestesPage() {
         if (!alive) return
         setTestes(Array.isArray(payload.items) ? payload.items : MOCK_TESTES)
         setDataSource(payload.data_source === 'supabase' ? 'supabase' : 'mock')
+        if (urlTestId) {
+          setSearch(urlTestId)
+          setStatusFilter('todos')
+          setHighlightedTestId(urlTestId)
+        }
       } catch {
         if (!alive) return
         setTestes(MOCK_TESTES)
@@ -248,6 +270,7 @@ export function TestesPage() {
 
   const testesFiltrados = testes.filter(t => {
     const matchSearch =
+      t.id.toLowerCase().includes(search.toLowerCase()) ||
       t.cliente.toLowerCase().includes(search.toLowerCase()) ||
       t.telefone.includes(search) ||
       t.app.toLowerCase().includes(search.toLowerCase())
@@ -276,6 +299,18 @@ export function TestesPage() {
   }
 
   const handleExpirarTeste = async (teste: Teste) => {
+    if (expiringTestId) return
+
+    const providerUrl = getProviderPanelUrl(teste.servidor) || getProviderPanelUrl(painelKey(teste.servidor)) || 'https://pedidospec.online/#/customers'
+    const openedPanel = window.open('about:blank', '_blank')
+    if (openedPanel) {
+      openedPanel.opener = null
+      openedPanel.location.href = providerUrl
+    }
+    setBlockedPanelUrl(openedPanel ? null : providerUrl)
+    setExpiringTestId(teste.id)
+    setModalExpirar(teste)
+
     try {
       const res = await fetch('/api/tests/expire', {
         method: 'POST',
@@ -284,19 +319,27 @@ export function TestesPage() {
       })
       const data = await res.json().catch(() => null)
       if (!res.ok || !data?.success) throw new Error(data?.error || `HTTP ${res.status}`)
+      if (openedPanel && data.provider_url && openedPanel.location.href !== data.provider_url) {
+        openedPanel.location.href = data.provider_url
+      }
+      if (!openedPanel && data.provider_url) {
+        setBlockedPanelUrl(data.provider_url)
+      }
 
       const username = data.username || teste.usuario
       if (username) {
         await navigator.clipboard.writeText(username)
-        addToast('success', 'Usuario copiado para a area de transferencia')
       }
-      window.open(data.provider_url || getProviderPanelUrl(teste.servidor) || getProviderPanelUrl(painelKey(teste.servidor)) || 'https://pedidospec.online/#/customers', '_blank')
-      window.open(data.painel2_url || `https://painel2.centralplayplus.com.br?source=painel1&flow=test_expired&test_id=${teste.id}`, '_blank')
       setTestes(prev => prev.map(item => item.id === teste.id ? { ...item, status: 'expirado' as StatusTeste } : item))
+      await carregarTestes().catch(() => null)
       setModalExpirar(null)
-      addToast('success', 'Teste marcado como expirado')
+      const alreadySent = data.already_expired || data.sticker_already_sent || data.dispatch?.already_sent
+      const alreadyRunning = data.already_running || data.dispatch?.reason === 'already_running'
+      addToast('success', alreadyRunning ? 'Expiracao ja esta em andamento. Aguarde a atualizacao da lista.' : alreadySent ? 'Teste ja estava expirado. Usuario copiado e figurinha nao foi reenviada.' : 'Teste expirado. Usuario copiado e figurinha enviada.')
     } catch (err) {
       addToast('error', err instanceof Error ? err.message : 'Falha ao expirar teste')
+    } finally {
+      setExpiringTestId(null)
     }
   }
 
@@ -405,11 +448,16 @@ export function TestesPage() {
                 key={teste.id}
                 teste={teste}
                 onVerDetalhes={() => addToast('info', `Detalhes: ${teste.usuario} / ${teste.senha}`)}
-                onConverter={() => addToast('success', `${teste.cliente} movido para Interessado!`)}
                 onAtivar={() => window.dispatchEvent(new CustomEvent('centralplay:navigate', { detail: { page: 'ativar-clientes', test_id: teste.id } }))}
                 onAbrirPainel2={() => abrirPainel2(teste)}
-                onExpirar={() => setModalExpirar(teste)}
+                onExpirar={() => {
+                  if (expiringTestId) return
+                  setBlockedPanelUrl(null)
+                  setModalExpirar(teste)
+                }}
                 onRemoverXCloud={() => setModalRemoverXCloud(teste)}
+                isExpiring={expiringTestId === teste.id}
+                highlighted={highlightedTestId === teste.id}
               />
             ))
           )}
@@ -420,10 +468,15 @@ export function TestesPage() {
       {modalExpirar && (
         <ConfirmModal
           title="Expirar teste"
-          description={`Copiar usuario, abrir painel ${modalExpirar.servidor} e mandar contexto test_expired para o Painel 2.`}
-          confirmLabel="Expirar teste"
+          description={expiringTestId === modalExpirar.id ? `Expirando teste, copiando usuario e enviando figurinha. Aguarde.` : `Copiar usuario, abrir painel ${modalExpirar.servidor} e mandar contexto test_expired para o Painel 2.`}
+          confirmLabel={expiringTestId === modalExpirar.id ? 'Expirando...' : 'Expirar teste'}
           danger
-          onClose={() => setModalExpirar(null)}
+          disabled={expiringTestId === modalExpirar.id}
+          blockedPanelUrl={blockedPanelUrl}
+          onClose={() => {
+            if (expiringTestId === modalExpirar.id) return
+            setModalExpirar(null)
+          }}
           onConfirm={() => handleExpirarTeste(modalExpirar)}
         />
       )}
@@ -449,6 +502,7 @@ function ConfirmModal({
   confirmLabel,
   danger,
   disabled,
+  blockedPanelUrl,
   onClose,
   onConfirm,
 }: {
@@ -457,6 +511,7 @@ function ConfirmModal({
   confirmLabel: string
   danger?: boolean
   disabled?: boolean
+  blockedPanelUrl?: string | null
   onClose: () => void
   onConfirm: () => void
 }) {
@@ -465,7 +520,9 @@ function ConfirmModal({
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
       style={{ background: 'rgba(7,10,18,0.82)', backdropFilter: 'blur(8px)' }}
-      onClick={onClose}
+      onClick={() => {
+        if (!disabled) onClose()
+      }}
     >
       <motion.div
         initial={{ scale: 0.96, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.96, opacity: 0 }}
@@ -475,19 +532,31 @@ function ConfirmModal({
       >
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-base font-semibold text-white">{title}</h3>
-          <button onClick={onClose} className="rounded-lg p-1 text-slate-500 hover:text-white"><X className="h-4 w-4" /></button>
+          <button disabled={disabled} onClick={onClose} className="rounded-lg p-1 text-slate-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"><X className="h-4 w-4" /></button>
         </div>
         <p className="mb-5 text-sm leading-relaxed text-slate-400">{description}</p>
+        {blockedPanelUrl && (
+          <button
+            onClick={() => window.open(blockedPanelUrl, '_blank', 'noopener,noreferrer')}
+            className="mb-4 h-11 w-full rounded-xl text-sm font-semibold text-white"
+            style={{ background: '#2563eb' }}
+          >
+            Abrir painel do provedor
+          </button>
+        )}
         <div className="flex gap-2">
           <button
             disabled={disabled}
             onClick={onConfirm}
-            className="h-10 flex-1 rounded-xl text-sm font-semibold text-white disabled:opacity-60"
+            className="h-10 flex-1 rounded-xl text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
             style={{ background: danger ? '#ef4444' : '#2563eb' }}
           >
-            {confirmLabel}
+            <span className="inline-flex items-center justify-center gap-2">
+              {disabled && <Loader2 className="h-4 w-4 animate-spin" />}
+              {confirmLabel}
+            </span>
           </button>
-          <button onClick={onClose} className="h-10 rounded-xl px-4 text-sm font-medium text-slate-400" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)' }}>
+          <button disabled={disabled} onClick={onClose} className="h-10 rounded-xl px-4 text-sm font-medium text-slate-400 disabled:cursor-not-allowed disabled:opacity-50" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)' }}>
             Cancelar
           </button>
         </div>

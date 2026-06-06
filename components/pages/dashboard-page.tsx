@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import {
-  TestTube2, Users, Kanban, Wallet, Zap,
+  TestTube2, Users, ClipboardList, Wallet, Zap,
   ArrowUpRight, Activity, Clock
 } from 'lucide-react'
 import type { NavPage } from '@/app/page'
@@ -52,7 +52,7 @@ export function DashboardPage({ onNavigate, metrics }: DashboardPageProps) {
 
   const testesAtivos   = dashboardMetrics?.active_tests        ?? MOCK_TESTES.filter(t => t.status === 'ativo').length
   const testesHoje     = dashboardMetrics?.total_tests         ?? MOCK_TESTES.length
-  const leadsAndamento = dashboardMetrics?.leads_in_progress   ?? MOCK_PIPELINE.filter(l => l.etapa !== 'ativado' && l.etapa !== 'renovacao').length
+  const operacaoHoje   = dashboardMetrics?.leads_in_progress   ?? MOCK_PIPELINE.filter(l => l.etapa !== 'ativado' && l.etapa !== 'renovacao').length
   const clientesAtivos = dashboardMetrics?.active_clients      ?? MOCK_CLIENTES.filter(c => c.status === 'ativo').length
   const creditos       = dashboardMetrics?.available_credits   ?? fin.creditosDisponiveis
   const receitaPrevista = dashboardMetrics?.monthly_renewal_forecast ?? dashboardMetrics?.revenue_forecast_30d ?? fin.receitaPrevista30d
@@ -84,7 +84,7 @@ export function DashboardPage({ onNavigate, metrics }: DashboardPageProps) {
   const kpis = [
     { label: 'Testes ativos',      value: testesAtivos,   icon: TestTube2, color: '#3b82f6', page: 'testes'   as NavPage },
     { label: 'Gerados hoje',       value: testesHoje,     icon: Zap,       color: '#f59e0b', page: 'testes'   as NavPage },
-    { label: 'Leads em andamento', value: leadsAndamento, icon: Kanban,    color: '#a78bfa', page: 'pipeline' as NavPage },
+    { label: 'Operação hoje',      value: operacaoHoje,   icon: ClipboardList, color: '#a78bfa', page: 'pipeline' as NavPage },
     { label: 'Clientes ativos',    value: clientesAtivos, icon: Users,     color: '#22c55e', page: 'clientes' as NavPage },
   ]
 
@@ -202,7 +202,7 @@ export function DashboardPage({ onNavigate, metrics }: DashboardPageProps) {
               <span className="text-xs text-slate-500">Créditos disponíveis</span>
             </div>
             <p className="text-3xl font-bold text-white mb-4" style={{ fontFamily: 'var(--font-display)' }}>
-              R$ {creditos.toFixed(0)}
+              {creditos.toFixed(0)}
             </p>
             <div className="space-y-2.5">
               {painelCreditos.slice(0, 4).map(c => (
@@ -212,7 +212,7 @@ export function DashboardPage({ onNavigate, metrics }: DashboardPageProps) {
                     {c.painel}
                   </span>
                   <span className="text-xs font-medium" style={{ color: c.alertaBaixo ? '#f59e0b' : '#94a3b8' }}>
-                    R$ {c.saldo.toFixed(0)}
+                    {c.saldo.toFixed(0)}
                   </span>
                 </div>
               ))}

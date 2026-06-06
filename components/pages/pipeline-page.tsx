@@ -15,10 +15,7 @@ const ETAPAS: { id: EtapaPipeline; label: string; color: string; glow: string }[
   { id: 'contato',      label: 'Baixando app',   color: '#6366f1', glow: '99,102,241' },
   { id: 'teste_gerado', label: 'Testando',       color: '#f59e0b', glow: '245,158,11' },
   { id: 'testando',     label: 'Finalizou',      color: '#eab308', glow: '234,179,8' },
-  { id: 'interessado',  label: 'Interesse',      color: '#a78bfa', glow: '167,139,250' },
   { id: 'pagou',        label: 'Pagou',          color: '#22c55e', glow: '34,197,94' },
-  { id: 'ativado',      label: 'Ativado',        color: '#14b8a6', glow: '20,184,166' },
-  { id: 'renovacao',    label: 'Renovação',      color: '#f97316', glow: '249,115,22' },
 ]
 
 export function PipelinePage() {
@@ -132,7 +129,7 @@ export function PipelinePage() {
                         etapa={etapa}
                         onClick={() => setSelecionado(lead)}
                         onAvancar={() => avancar(lead)}
-                        isLast={etapa.id === 'renovacao'}
+                        isLast={etapa.id === 'pagou'}
                       />
                     ))}
                   </AnimatePresence>
@@ -217,7 +214,7 @@ function LeadDrawer({
   onClose: () => void
   onAvancar: () => void
 }) {
-  const isLast = etapa.id === 'renovacao'
+  const isLast = etapa.id === 'pagou'
 
   return (
     <>

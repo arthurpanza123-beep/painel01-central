@@ -1,5 +1,6 @@
 import { maskSensitiveText } from '@/lib/services/masking'
 import { getSupabaseServerClient } from '@/lib/supabase/server'
+import { findProvider } from '@/lib/config/provider-catalog'
 
 type JsonRecord = Record<string, unknown>
 
@@ -95,6 +96,10 @@ export type ActivationRecommendation = {
   capacity: number
   app_id: string | null
   panel_id: string | null
+  app_key: string | null
+  panel_key: string | null
+  app_name: string | null
+  panel_name: string | null
 }
 
 type ActivationContext = {
@@ -127,6 +132,97 @@ function normalizePhone(value: string): string {
   const digits = value.replace(/\D/g, '')
   if (!digits) return ''
   return digits.startsWith('55') ? digits : `55${digits}`
+}
+
+function normalizeLookupKey(value: unknown): string {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+}
+
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+}
+
+const APP_ALIASES: Record<string, string> = {
+  xcloud: 'xcloud',
+  blessed: 'blessed',
+  blessed_player: 'blessed',
+  playsim: 'playsim',
+  play_sim: 'playsim',
+  funplay: 'funplay',
+  fun_play: 'funplay',
+  fun_player: 'fun_player',
+  magic: 'magic',
+  magic_player: 'magic',
+  lotus: 'lotus',
+  lotus_player: 'lotus',
+  assist: 'assist_plus',
+  assist_plus: 'assist_plus',
+  assisti_plus: 'assist_plus',
+}
+
+const PANEL_ALIASES: Record<string, string> = {
+  yellow: 'brasil_yellow',
+  yellow_box: 'brasil_yellow',
+  brasil_yellow: 'brasil_yellow',
+  brasil_yellow_box: 'brasil_yellow',
+  brasil_tv: 'brasil_yellow',
+  yellow_novo: 'brasil_yellow',
+  yellow_x3: 'brasil_yellow',
+  yellow_x3_antigo: 'brasil_yellow',
+  x3: 'brasil_yellow',
+  x3_antigo: 'brasil_yellow',
+  pedidospec: 'brasil_yellow',
+  pedidospec_online: 'brasil_yellow',
+  ninety: 'ninety',
+  noventa: 'ninety',
+  '90': 'ninety',
+  cinemax: 'cinemax',
+  cine_max: 'cinemax',
+  xbr: 'devxtop_magic',
+  devxtop: 'devxtop_magic',
+  devx_top: 'devxtop_magic',
+  xbr_devxtop: 'devxtop_magic',
+  xbr_devx_top: 'devxtop_magic',
+  area: 'areaplay',
+  areaplay: 'areaplay',
+  sigma: 'areaplay',
+  areaplay_sigma: 'areaplay',
+}
+
+function resolveAppKey(input?: string): string {
+  const normalized = normalizeLookupKey(input)
+  return APP_ALIASES[normalized] || normalized
+}
+
+function resolvePanelKey(input?: string): string {
+  const raw = String(input || '').trim()
+  const normalized = normalizeLookupKey(raw)
+  if (PANEL_ALIASES[normalized]) return PANEL_ALIASES[normalized]
+
+  const provider = findProvider(raw)
+  if (provider) {
+    const providerKey = normalizeLookupKey(provider.key)
+    return PANEL_ALIASES[providerKey] || providerKey
+  }
+
+  try {
+    const host = new URL(raw).host
+    const byHost = findProvider(host)
+    if (byHost) {
+      const providerKey = normalizeLookupKey(byHost.key)
+      return PANEL_ALIASES[providerKey] || providerKey
+    }
+    if (host.includes('pedidospec')) return 'brasil_yellow'
+  } catch {
+    // Not a URL; keep alias/key lookup result.
+  }
+
+  return normalized
 }
 
 function amountToCents(input: ActivationInput): number {
@@ -174,6 +270,17 @@ async function writeLog(event: string, level: 'info' | 'warning' | 'error' | 'su
   message?: string
   metadata?: JsonRecord
 }) {
+  const consolePayload = {
+    client_id: payload.client_id || null,
+    test_id: payload.test_id || null,
+    account_id: payload.account_id || null,
+    ...(payload.metadata || {}),
+  }
+  const line = `[${event}] ${safeMessage(payload.message || event)} ${JSON.stringify(consolePayload)}`
+  if (level === 'error') console.error(line)
+  else if (level === 'warning') console.warn(line)
+  else console.log(line)
+
   const database = db()
   const { error } = await database.from('logs').insert({
     scope: 'activation',
@@ -186,6 +293,35 @@ async function writeLog(event: string, level: 'info' | 'warning' | 'error' | 'su
     metadata: payload.metadata || {},
   })
   if (error) throw new ActivationError(500, 'LOG_WRITE_FAILED', `Falha ao registrar log ${event}: ${error.message}`)
+}
+
+async function resolveApp(database: ReturnType<typeof db>, appId?: string, appKeyInput?: string): Promise<AppRow> {
+  const appKey = resolveAppKey(appKeyInput)
+  const query = database.from('apps').select('id,key,name')
+  const { data, error } = appId && isUuid(appId)
+    ? await query.eq('id', appId).maybeSingle()
+    : await query.eq('key', appKey).maybeSingle()
+  if (error) throw new ActivationError(500, 'APP_LOOKUP_FAILED', error.message)
+  if (!data) {
+    throw new ActivationError(404, 'APP_NOT_FOUND', `App nao encontrado no banco: valor recebido "${appKeyInput || appId || ''}", normalizado "${appKey}".`)
+  }
+  return data as AppRow
+}
+
+async function resolvePanel(database: ReturnType<typeof db>, panelId?: string | null, panelKeyInput?: string): Promise<PanelRow | null> {
+  if (!panelId && !panelKeyInput) return null
+
+  const panelKey = resolvePanelKey(panelKeyInput)
+  const query = database.from('panels').select('id,key,name')
+  const { data, error } = panelId && isUuid(panelId)
+    ? await query.eq('id', panelId).maybeSingle()
+    : await query.eq('key', panelKey).maybeSingle()
+  if (error) throw new ActivationError(500, 'PANEL_LOOKUP_FAILED', error.message)
+  if (!data) {
+    console.error(`[ACTIVATION_PANEL_NOT_FOUND] Painel nao encontrado no banco/catalogo: valor recebido "${panelKeyInput || panelId || ''}", normalizado "${panelKey}".`)
+    throw new ActivationError(404, 'PANEL_NOT_FOUND', `Painel nao encontrado no banco/catalogo: valor recebido "${panelKeyInput || panelId || ''}", normalizado "${panelKey}".`)
+  }
+  return data as PanelRow
 }
 
 async function resolveContext(input: ActivationInput): Promise<ActivationContext> {
@@ -252,22 +388,10 @@ async function resolveContext(input: ActivationInput): Promise<ActivationContext
 
   const appId = input.app_id || test?.app_id || accountDefaults?.app_id
   if (!appId && !input.app_key) throw new ActivationError(400, 'APP_REQUIRED', 'app_id/app_key e obrigatorio quando o teste nao informa app.')
-  let appQuery = database.from('apps').select('id,key,name')
-  appQuery = appId ? appQuery.eq('id', appId) : appQuery.eq('key', input.app_key)
-  const { data: appData, error: appError } = await appQuery.maybeSingle()
-  if (appError) throw new ActivationError(500, 'APP_LOOKUP_FAILED', appError.message)
-  if (!appData) throw new ActivationError(404, 'APP_NOT_FOUND', 'App nao encontrado.')
+  const appData = await resolveApp(database, appId || undefined, input.app_key)
 
   const panelId = input.panel_id || test?.panel_id || accountDefaults?.panel_id
-  let panel: PanelRow | null = null
-  if (panelId || input.panel_key) {
-    let panelQuery = database.from('panels').select('id,key,name')
-    panelQuery = panelId ? panelQuery.eq('id', panelId) : panelQuery.eq('key', input.panel_key)
-    const { data: panelData, error: panelError } = await panelQuery.maybeSingle()
-    if (panelError) throw new ActivationError(500, 'PANEL_LOOKUP_FAILED', panelError.message)
-    if (!panelData) throw new ActivationError(404, 'PANEL_NOT_FOUND', 'Painel nao encontrado.')
-    panel = panelData as PanelRow
-  }
+  const panel = await resolvePanel(database, panelId, input.panel_key)
 
   return {
     client,
@@ -341,7 +465,7 @@ function providerFromPanel(panel: PanelRow | null): string | null {
 
 async function createConfirmedNewAccount(context: ActivationContext, input: ActivationInput): Promise<{ account: AccountRow; slot: SlotRow; capacity: number }> {
   if (!input.create_new_account_confirmed) {
-    throw new ActivationError(409, 'NO_FREE_SLOT', 'Nenhuma vaga livre compativel encontrada. Criacao de nova conta exige confirmacao do operador.')
+    throw new ActivationError(409, 'NO_FREE_SLOT', 'Nenhuma tela livre compativel encontrada. Criacao de nova conta exige confirmacao do operador.')
   }
 
   const username = String(input.new_account?.username || '').trim()
@@ -429,23 +553,49 @@ export async function getActivationRecommendation(input: {
     panel_key: input.panel_key,
     account_id: input.account_id,
   })
+  await writeLog('ACTIVATION_RECOMMENDATION_REQUESTED', 'info', {
+    client_id: context.client.id,
+    test_id: context.test?.id || null,
+    message: 'Recomendacao de tela solicitada.',
+    metadata: {
+      requested_app_key: input.app_key || null,
+      requested_panel_key: input.panel_key || null,
+      app_key: context.app.key,
+      panel_key: context.panel?.key || null,
+    },
+  })
+  await writeLog('ACTIVATION_PROVIDER_RESOLVED', 'info', {
+    client_id: context.client.id,
+    test_id: context.test?.id || null,
+    message: `Provider resolvido para app ${context.app.key} e painel ${context.panel?.key || 'sem painel'}.`,
+    metadata: {
+      app_id: context.app.id,
+      app_key: context.app.key,
+      app_name: context.app.name,
+      panel_id: context.panel?.id || null,
+      panel_key: context.panel?.key || null,
+      panel_name: context.panel?.name || null,
+    },
+  })
   const found = await findFreeSlot(context.app.id, context.panel?.id || null, input)
   const capacity = panelCapacity(context.panel)
 
   if (!found) {
-    await writeLog('ACTIVATION_RECOMMENDATION_FOUND', 'warning', {
+    await writeLog('ACTIVATION_RECOMMENDATION_EMPTY', 'warning', {
       client_id: context.client.id,
       test_id: context.test?.id || null,
-      message: 'Nenhuma vaga livre compativel encontrada.',
+      message: 'Nenhuma tela livre encontrada para este painel/app.',
       metadata: {
         app_id: context.app.id,
+        app_key: context.app.key,
         panel_id: context.panel?.id || null,
+        panel_key: context.panel?.key || null,
         requires_new_account: true,
       },
     })
     return {
       recommended: false,
-      reason: 'Nenhuma vaga livre. Sera necessario criar nova conta.',
+      reason: 'Nenhuma tela livre. Sera necessario criar nova conta.',
       account_id: null,
       account_label: null,
       slot_id: null,
@@ -455,10 +605,14 @@ export async function getActivationRecommendation(input: {
       capacity,
       app_id: context.app.id,
       panel_id: context.panel?.id || null,
+      app_key: context.app.key,
+      panel_key: context.panel?.key || null,
+      app_name: context.app.name,
+      panel_name: context.panel?.name || null,
     }
   }
 
-  const reason = `Usar vaga livre na ${slotLabel(found.slot.slot_number)} da conta ${accountLabel(found.account)} economiza credito`
+  const reason = `Usar tela livre na ${slotLabel(found.slot.slot_number)} da conta ${accountLabel(found.account)} economiza credito`
   await writeLog('ACTIVATION_RECOMMENDATION_FOUND', 'info', {
     client_id: context.client.id,
     test_id: context.test?.id || null,
@@ -466,7 +620,9 @@ export async function getActivationRecommendation(input: {
     message: reason,
     metadata: {
       app_id: context.app.id,
+      app_key: context.app.key,
       panel_id: context.panel?.id || null,
+      panel_key: context.panel?.key || null,
       slot_id: found.slot.id,
       slot_number: found.slot.slot_number,
       requires_new_account: false,
@@ -485,6 +641,10 @@ export async function getActivationRecommendation(input: {
     capacity: found.capacity,
     app_id: context.app.id,
     panel_id: context.panel?.id || null,
+    app_key: context.app.key,
+    panel_key: context.panel?.key || null,
+    app_name: context.app.name,
+    panel_name: context.panel?.name || null,
   }
 }
 
@@ -522,6 +682,34 @@ export async function activatePaidClient(input: ActivationInput) {
 
   try {
     const context = await resolveContext(input)
+    await writeLog('ACTIVATION_STARTED', 'info', {
+      client_id: context.client.id,
+      test_id: context.test?.id || null,
+      message: 'Ativacao real iniciada.',
+      metadata: {
+        requested_app_key: input.app_key || null,
+        requested_panel_key: input.panel_key || null,
+        app_id: context.app.id,
+        app_key: context.app.key,
+        panel_id: context.panel?.id || null,
+        panel_key: context.panel?.key || null,
+        account_id: input.account_id || null,
+        slot_id: input.slot_id || null,
+      },
+    })
+    await writeLog('ACTIVATION_PROVIDER_RESOLVED', 'info', {
+      client_id: context.client.id,
+      test_id: context.test?.id || null,
+      message: `Ativacao resolveu app ${context.app.key} e painel ${context.panel?.key || 'sem painel'}.`,
+      metadata: {
+        app_id: context.app.id,
+        app_key: context.app.key,
+        app_name: context.app.name,
+        panel_id: context.panel?.id || null,
+        panel_key: context.panel?.key || null,
+        panel_name: context.panel?.name || null,
+      },
+    })
 
     if (context.client.status === 'active') {
       throw new ActivationError(409, 'CLIENT_ALREADY_ACTIVE', 'Cliente ja esta ativo.')
@@ -564,7 +752,16 @@ export async function activatePaidClient(input: ActivationInput) {
       .maybeSingle()
 
     if (occupyError) throw new ActivationError(500, 'SLOT_OCCUPY_FAILED', occupyError.message)
-    if (!occupiedSlot) throw new ActivationError(409, 'SLOT_ALREADY_OCCUPIED', 'Slot ja foi ocupado por outro cliente.')
+    if (!occupiedSlot) {
+      await writeLog('ACTIVATION_SLOT_OCCUPIED', 'warning', {
+        client_id: context.client.id,
+        test_id: context.test?.id || null,
+        account_id: account.id,
+        message: 'Tela ja foi ocupada por outro cliente.',
+        metadata: { slot_id: slot.id, slot_number: slot.slot_number },
+      })
+      throw new ActivationError(409, 'SLOT_ALREADY_OCCUPIED', 'Tela ja foi ocupada por outro cliente.')
+    }
 
     touched.slot = { id: slot.id, previous_status: slot.status, previous_client_id: slot.client_id }
     touched.account_id = account.id
@@ -678,6 +875,20 @@ export async function activatePaidClient(input: ActivationInput) {
         panel_id: context.panel?.id || null,
         renewal_id: renewal.id,
         reused_existing_slot: true,
+      },
+    })
+
+    await writeLog('ACTIVATION_COMPLETED', 'success', {
+      client_id: context.client.id,
+      test_id: context.test?.id || null,
+      account_id: account.id,
+      message: `Ativacao concluida em ${slotLabel(slot.slot_number)} da conta ${accountLabel(account)}.`,
+      metadata: {
+        slot_id: slot.id,
+        slot_number: slot.slot_number,
+        app_key: context.app.key,
+        panel_key: context.panel?.key || null,
+        renewal_id: renewal.id,
       },
     })
 

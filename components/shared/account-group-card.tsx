@@ -4,7 +4,7 @@ import { motion } from 'framer-motion'
 import { Layers, Eye, Calendar, Tv2, UserPlus } from 'lucide-react'
 import type { Conta } from '@/lib/mock-data'
 
-// Card de grupo de conta com vagas (ocupacao 1/2, 2/2, vaga disponivel).
+// Card de grupo de conta com telas (ocupacao 1/2, 2/2, tela disponivel).
 export function AccountGroupCard({
   conta,
   destacar = false,
@@ -53,7 +53,7 @@ export function AccountGroupCard({
                 className="text-[10px] font-medium px-2 py-0.5 rounded-full shrink-0"
                 style={{ background: `${cor}1a`, color: cor }}
               >
-                {cheia ? `${ocupadas}/${conta.vagasTotal} Cheia` : `${livres} vaga${livres > 1 ? 's' : ''}`}
+                {cheia ? `${ocupadas}/${conta.vagasTotal} Cheia` : `${livres} tela${livres > 1 ? 's' : ''}`}
               </span>
               {destacar && !cheia && (
                 <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold text-emerald-300" style={{ background: 'rgba(34,197,94,0.12)' }}>
@@ -86,7 +86,7 @@ export function AccountGroupCard({
         </span>
       </div>
 
-      {/* Vagas */}
+      {/* Telas */}
       <div className="space-y-2">
         {vagas.map((vinc, i) =>
           vinc ? (
@@ -121,8 +121,8 @@ export function AccountGroupCard({
                 <UserPlus className="h-3.5 w-3.5" />
               </div>
               <div className="text-left">
-                <span className="text-xs font-medium block" style={{ color: '#60a5fa' }}>Ativar cliente nesta vaga</span>
-                <span className="text-[10px] text-slate-600">Vaga {i + 1} disponivel</span>
+                <span className="text-xs font-medium block" style={{ color: '#60a5fa' }}>Usar esta tela</span>
+                <span className="text-[10px] text-slate-600">Tela {i + 1} disponivel</span>
               </div>
             </button>
           )

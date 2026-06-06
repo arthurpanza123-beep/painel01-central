@@ -1,5 +1,7 @@
 import { maskDeviceKey, maskPassword, maskPhone, maskSensitiveText, maskUrl, maskUsername } from '@/lib/services/masking'
+import { isoPlusMinutes } from '@/lib/services/operational-window'
 import { getSupabaseServerClient } from '@/lib/supabase/server'
+import { runXcloudWorker } from '@/lib/services/xcloud-worker'
 
 import { generateTest } from './generate-test'
 import { createYellowBoxTest } from './providers/yellow-box'
@@ -86,6 +88,10 @@ function isUuid(value: string): boolean {
 
 function mode(): 'mock' | 'real' {
   return process.env.TEST_GENERATION_MODE === 'real' ? 'real' : 'mock'
+}
+
+function xcloudWorkerEnabled(): boolean {
+  return /^(1|true|yes|on)$/i.test(String(process.env.XCLOUD_WORKER_ENABLED || ''))
 }
 
 function publicCode(appKey: string, providerCode?: string): string | undefined {
@@ -245,6 +251,7 @@ export async function createGeneratedTest(input: CreateTestInput) {
   const phoneRaw = String(input.phone || input.telefone || '').trim()
   const phoneE164 = normalizePhone(phoneRaw)
   const deviceKey = String(input.device_key || input.deviceKey || '').trim()
+  const operatorRef = String(input.operator_ref || '').trim() || null
 
   try {
     if (!clientName || !phoneRaw || !phoneE164) {
@@ -253,7 +260,7 @@ export async function createGeneratedTest(input: CreateTestInput) {
 
     await writeLog('TEST_CREATE_STARTED', 'info', {
       message: `Inicio da geracao de teste para ${clientName}.`,
-      metadata: { phone: maskPhone(phoneRaw), mode: testMode },
+      metadata: { phone: maskPhone(phoneRaw), mode: testMode, operator_ref: operatorRef },
     })
 
     const app = await resolveApp(input.app_id, input.app_key || input.app)
@@ -268,11 +275,11 @@ export async function createGeneratedTest(input: CreateTestInput) {
 
     await writeLog('TEST_PROVIDER_SELECTED', 'info', {
       message: `Provider selecionado: ${panel.name}.`,
-      metadata: { app_key: app.key, panel_key: panel.key, provider: providerName(panel.key) },
+      metadata: { app_key: app.key, panel_key: panel.key, provider: providerName(panel.key), operator_ref: operatorRef },
     })
     await writeLog('YELLOW_BOX_TEST_START', 'info', {
       message: `Iniciando teste Yellow Box para app=${app.key}.`,
-      metadata: { app_key: app.key, phone: maskPhone(phoneRaw), device_key: deviceKey ? maskDeviceKey(deviceKey) : null },
+      metadata: { app_key: app.key, phone: maskPhone(phoneRaw), device_key: deviceKey ? maskDeviceKey(deviceKey) : null, operator_ref: operatorRef },
     })
 
     const providerResult = await callProvider({ client_name: clientName, phone: phoneE164, app, panel, device_key: deviceKey || undefined })
@@ -289,11 +296,13 @@ export async function createGeneratedTest(input: CreateTestInput) {
         password: maskPassword(providerResult.password),
         has_m3u: Boolean(providerResult.optional_m3u_url),
         expires_at: providerResult.expires_at,
+        operator_ref: operatorRef,
       },
     })
 
-    const database = db()
     const now = new Date().toISOString()
+    const expiresAt = isoPlusMinutes(75, new Date(now))
+    const database = db()
     const existing = await database
       .from('clients')
       .select('id,status,legacy_metadata')
@@ -339,7 +348,7 @@ export async function createGeneratedTest(input: CreateTestInput) {
       source: testMode === 'real' ? 'test_generation_real' : 'test_generation_mock',
       requested_at: startedAt,
       activated_at: now,
-      expires_at: providerResult.expires_at,
+      expires_at: expiresAt,
       legacy_metadata: {
         order_id: providerResult.order_id || null,
         host: providerResult.host || null,
@@ -382,7 +391,29 @@ export async function createGeneratedTest(input: CreateTestInput) {
       client_id: client.id,
       test_id: test.id,
       message: `Teste criado para ${clientName} | app=${app.key} panel=${panel.key}.`,
-      metadata: { order_id: providerResult.order_id || null, expires_at: providerResult.expires_at },
+      metadata: { order_id: providerResult.order_id || null, expires_at: expiresAt, operator_ref: operatorRef },
+    })
+
+    let xcloudWorker: Awaited<ReturnType<typeof runXcloudWorker>> | null = null
+    if (app.key === 'xcloud' && deviceKey && xcloudWorkerEnabled()) {
+      try {
+        xcloudWorker = await runXcloudWorker({ test_id: test.id, operator_ref: operatorRef || 'painel_web_wizard' })
+      } catch (workerError) {
+        await writeLog('XCLOUD_WORKER_AUTORUN_FAILED', 'error', {
+          client_id: client.id,
+          test_id: test.id,
+          message: workerError instanceof Error ? workerError.message : String(workerError),
+          metadata: { app_key: app.key, device_key: maskDeviceKey(deviceKey), operator_ref: operatorRef },
+        })
+        throw workerError
+      }
+    }
+
+    await writeLog('TEST_MESSAGE_PREPARED', 'success', {
+      client_id: client.id,
+      test_id: test.id,
+      message: 'Mensagem de teste preparada.',
+      metadata: { flow: 'test_created', app_key: app.key, operator_ref: operatorRef },
     })
 
     return {
@@ -407,10 +438,11 @@ export async function createGeneratedTest(input: CreateTestInput) {
         code: providerCode || null,
         provider_code: providerCode || null,
         dns: providerResult.dns || null,
-        expires_at: providerResult.expires_at,
-        validade: providerResult.expires_at,
+        expires_at: expiresAt,
+        validade: expiresAt,
         device_key: app.key === 'xcloud' && deviceKey ? maskDeviceKey(deviceKey) : null,
-        xcloud_worker_status: app.key === 'xcloud' ? 'not_started' : null,
+        xcloud_worker_status: app.key === 'xcloud' ? xcloudWorker?.status || (xcloudWorkerEnabled() ? 'running' : 'not_started') : null,
+        xcloud_worker: xcloudWorker,
         mensagem: publicTestMessage({
           clientName,
           appName: app.name,
@@ -418,7 +450,7 @@ export async function createGeneratedTest(input: CreateTestInput) {
           username: providerResult.username,
           password: providerResult.password,
           providerCode,
-          expiresAt: providerResult.expires_at,
+          expiresAt,
         }),
       },
       account: null,
