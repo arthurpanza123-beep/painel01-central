@@ -11,7 +11,7 @@ const ContasPage           = dynamic(() => import('@/components/pages/contas-pag
 const RenovacoesPage       = dynamic(() => import('@/components/pages/renovacoes-page').then(m => ({ default: m.RenovacoesPage })), { ssr: false })
 const FinanceiroPage       = dynamic(() => import('@/components/pages/financeiro-page').then(m => ({ default: m.FinanceiroPage })), { ssr: false })
 const ProblemasPage        = dynamic(() => import('@/components/pages/problemas-page').then(m => ({ default: m.ProblemasPage })), { ssr: false })
-const ConfiguracoesPage    = dynamic(() => import('@/components/pages/configuracoes-page').then(m => ({ default: m.ConfiguracoesPage })), { ssr: false })
+const CodexPage            = dynamic(() => import('@/components/pages/codex-page').then(m => ({ default: m.CodexPage })), { ssr: false })
 const DebugPage            = dynamic(() => import('@/components/pages/debug-page').then(m => ({ default: m.DebugPage })), { ssr: false })
 const PipelinePage         = dynamic(() => import('@/components/pages/pipeline-page').then(m => ({ default: m.PipelinePage })), { ssr: false })
 const DashboardPage        = dynamic(() => import('@/components/pages/dashboard-page').then(m => ({ default: m.DashboardPage })), { ssr: false })
@@ -28,7 +28,7 @@ export type NavPage =
   | 'renovacoes' 
   | 'financeiro' 
   | 'problemas' 
-  | 'configuracoes' 
+  | 'codex' 
   | 'debug'
 
 export default function App() {
@@ -63,7 +63,7 @@ export default function App() {
         {page === 'renovacoes'     && <RenovacoesPage />}
         {page === 'financeiro'     && <FinanceiroPage />}
         {page === 'problemas'      && <ProblemasPage />}
-        {page === 'configuracoes'  && <ConfiguracoesPage />}
+        {page === 'codex'          && <CodexPage />}
         {page === 'debug'          && <DebugPage />}
       </main>
     </div>
