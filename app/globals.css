@@ -204,3 +204,9 @@
   background: linear-gradient(90deg, transparent, rgba(59,130,246,0.5), transparent);
   border-radius: 999px;
 }
+
+/* Codex chat - typing dots */
+@keyframes codexDot {
+  0%, 60%, 100% { opacity: 0.25; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-2px); }
+}

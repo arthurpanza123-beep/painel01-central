@@ -28,8 +28,31 @@ export function operationWindows(now = new Date()) {
   }
 }
 
+// Padrões "estruturais" de QA/automação que nunca são clientes reais.
+const STRUCTURAL_NOISE =
+  /worker|codex|mock|teste e2e|e2e|reject|tempor[aá]rio|temporary|operador final|recaptura|real xcloud|real blessed|real playsim|teste segunda tela|teste renovacao|teste renovação|teste ativa[cç][aã]o|teste expire idempotente|idempotente/i
+
+// Nomes de teste/QA configuráveis. Edite OPERATIONAL_NOISE_NAMES no ambiente
+// para incluir/remover nomes sem deploy de código.
+const FALLBACK_NOISE_NAMES = ['arthur', 'cristian', 'robson']
+
+function configuredNoiseNames(): string[] {
+  const raw = process.env.OPERATIONAL_NOISE_NAMES
+  if (!raw) return FALLBACK_NOISE_NAMES
+  return raw
+    .split(',')
+    .map((name) => name.trim().toLowerCase())
+    .filter(Boolean)
+}
+
 export function isOperationalNoise(value: unknown): boolean {
-  return /worker|codex|mock|teste e2e|e2e|reject|tempor[aá]rio|temporary|teste segunda tela arthur|teste renovacao arthur|teste ativa[cç][aã]o blessed arthur|teste expire idempotente/i.test(String(value || ''))
+  const text = String(value || '').toLowerCase().trim()
+  if (!text) return false
+  if (STRUCTURAL_NOISE.test(text)) return true
+  // Compara por palavra para não esconder, ex., "Arthurina" sem querer.
+  const tokens = text.split(/[^a-zà-ú0-9]+/i).filter(Boolean)
+  const noiseNames = configuredNoiseNames()
+  return tokens.some((token) => noiseNames.includes(token))
 }
 
 export function isoPlusMinutes(minutes: number, now = new Date()): string {

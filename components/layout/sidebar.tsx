@@ -10,7 +10,7 @@ import {
   RefreshCw, 
   DollarSign, 
   AlertTriangle, 
-  Settings, 
+  Sparkles, 
   Terminal,
   LogOut,
   Kanban,
@@ -29,7 +29,7 @@ const NAV_ITEMS: { id: NavPage; label: string; Icon: React.FC<{ className?: stri
   { id: 'renovacoes',   label: 'Renovacoes',   Icon: ({ className }) => <RefreshCw className={className} /> },
   { id: 'financeiro',   label: 'Financeiro',   Icon: ({ className }) => <DollarSign className={className} /> },
   { id: 'problemas',    label: 'Problemas',    Icon: ({ className }) => <AlertTriangle className={className} /> },
-  { id: 'configuracoes',label: 'Configuracoes',Icon: ({ className }) => <Settings className={className} /> },
+  { id: 'codex',        label: 'Codex',        Icon: ({ className }) => <Sparkles className={className} /> },
   { id: 'debug',        label: 'Logs',         Icon: ({ className }) => <Terminal className={className} /> },
 ]
 
