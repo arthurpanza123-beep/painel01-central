@@ -173,11 +173,21 @@ async function createPipelineEvent(test: XcloudResolvedTest, eventType: string, 
 async function updateTestMetadata(test: XcloudResolvedTest, patch: JsonRecord) {
   if (!test.test_id) return
   const database = db()
+  const { data: currentData, error: lookupError } = await database
+    .from('tests')
+    .select('legacy_metadata')
+    .eq('id', test.test_id)
+    .maybeSingle()
+  if (lookupError) throw new XcloudWorkerError(500, 'XCLOUD_TEST_METADATA_LOOKUP_FAILED', lookupError.message, 'GenerateAccess')
+  const currentMetadata = ((currentData as { legacy_metadata?: JsonRecord } | null)?.legacy_metadata || {}) as JsonRecord
+  const currentWorker = currentMetadata.xcloud_worker && typeof currentMetadata.xcloud_worker === 'object' && !Array.isArray(currentMetadata.xcloud_worker)
+    ? currentMetadata.xcloud_worker as JsonRecord
+    : {}
   const { error } = await database.from('tests').update({
     legacy_metadata: {
-      ...(test.legacy_metadata || {}),
+      ...currentMetadata,
       xcloud_worker: {
-        ...(((test.legacy_metadata || {}).xcloud_worker as JsonRecord | undefined) || {}),
+        ...currentWorker,
         ...patch,
         updated_at: new Date().toISOString(),
       },

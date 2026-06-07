@@ -26,9 +26,12 @@ async function markRetrySucceeded(testId: string, result: JsonRecord) {
   const now = new Date().toISOString()
   await db.from('tests').update({
     status: 'active',
+    activated_at: now,
     failed_at: null,
     legacy_metadata: {
       ...metadata,
+      pending_xcloud_confirmation: false,
+      xcloud_ready_at: now,
       xcloud_worker: {
         ...((metadata.xcloud_worker && typeof metadata.xcloud_worker === 'object' && !Array.isArray(metadata.xcloud_worker)) ? metadata.xcloud_worker as JsonRecord : {}),
         ...result,
@@ -48,7 +51,20 @@ async function markRetrySucceeded(testId: string, result: JsonRecord) {
   }).eq('id', testId)
 
   if (row.client_id) {
-    await db.from('clients').update({ status: 'test_active' }).eq('id', row.client_id).neq('status', 'active')
+    const { data: clientData } = await db
+      .from('clients')
+      .select('legacy_metadata')
+      .eq('id', row.client_id)
+      .maybeSingle()
+    const clientMetadata = ((clientData as { legacy_metadata?: JsonRecord } | null)?.legacy_metadata || {}) as JsonRecord
+    await db.from('clients').update({
+      status: 'test_active',
+      legacy_metadata: {
+        ...clientMetadata,
+        latest_test_confirmed_at: now,
+        latest_test_pending_xcloud_confirmation: false,
+      },
+    }).eq('id', row.client_id).neq('status', 'active')
   }
 }
 

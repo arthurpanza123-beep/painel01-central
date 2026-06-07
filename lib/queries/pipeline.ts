@@ -10,7 +10,18 @@ export type PipelineQueryResult = {
 }
 
 type ClientRow = { id: string; name: string | null; phone_e164: string | null; status: string | null; notes: string | null; created_at: string | null; updated_at: string | null }
-type TestRow = { id: string; client_id: string; app_id: string | null; panel_id: string | null; status: string | null; created_at: string | null; updated_at: string | null }
+type TestRow = {
+  id: string
+  client_id: string
+  app_id: string | null
+  panel_id: string | null
+  account_id: string | null
+  device_key: string | null
+  status: string | null
+  legacy_metadata: Record<string, unknown> | null
+  created_at: string | null
+  updated_at: string | null
+}
 type RenewalRow = { id: string; client_id: string | null; amount_cents: number | null; status: string | null; created_at: string | null; updated_at: string | null }
 type AppRow = { id: string; name: string; key: string }
 type PanelRow = { id: string; name: string; key: string }
@@ -42,6 +53,7 @@ function normalizePhone(value: string | null | undefined): string {
 }
 
 function mapStage(clientStatus: string | null, test?: TestRow, renewal?: RenewalRow): EtapaPipeline {
+  if (isXcloudProvisioningFailure(test)) return clientStatus === 'lead' ? 'novo_lead' : 'contato'
   if (renewal?.status === 'paid' || renewal?.status === 'applied' || test?.status === 'converted') return 'pagou'
   if (test?.status === 'expired' || test?.status === 'failed' || test?.status === 'cancelled' || test?.status === 'archived') return 'testando'
   if (test?.status === 'active' || test?.status === 'generating' || test?.status === 'pending' || clientStatus === 'test_active') return 'teste_gerado'
@@ -78,6 +90,18 @@ function eventClientId(event: PipelineEventRow): string {
 
 function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)
+}
+
+function isXcloudProvisioningFailure(test?: TestRow): boolean {
+  if (!test || !['failed', 'cancelled'].includes(String(test.status || '').toLowerCase())) return false
+  if (test.account_id) return false
+  const metadata = test.legacy_metadata || {}
+  const worker = metadata.xcloud_worker
+  return Boolean(
+    test.device_key ||
+    Object.prototype.hasOwnProperty.call(metadata, 'pending_xcloud_confirmation') ||
+    (worker && typeof worker === 'object' && !Array.isArray(worker)),
+  )
 }
 
 function latestByClient(events: PipelineEventRow[]) {
@@ -133,7 +157,7 @@ export async function getPipelineData(): Promise<PipelineQueryResult> {
     const [eventsRes, todayClientsRes, testsRes, renewalsRes, appsRes, panelsRes] = await Promise.all([
       db.from('pipeline_events').select('id,entity_type,entity_id,event_type,to_status,payload,created_at').gte('created_at', last24hIso).order('created_at', { ascending: false }).limit(500),
       db.from('clients').select('id,name,phone_e164,status,notes,created_at,updated_at').gte('created_at', last24hIso).order('created_at', { ascending: false }).limit(150),
-      db.from('tests').select('id,client_id,app_id,panel_id,status,created_at,updated_at').gte('created_at', last24hIso).order('created_at', { ascending: false }),
+      db.from('tests').select('id,client_id,app_id,panel_id,account_id,device_key,status,legacy_metadata,created_at,updated_at').gte('created_at', last24hIso).order('created_at', { ascending: false }),
       db.from('renewals').select('id,client_id,amount_cents,status,created_at,updated_at').gte('created_at', last24hIso).order('created_at', { ascending: false }),
       db.from('apps').select('id,name,key'),
       db.from('panels').select('id,name,key'),
@@ -183,7 +207,7 @@ export async function getPipelineData(): Promise<PipelineQueryResult> {
       const test = latestTestByClient.get(client.id)
       const renewal = latestRenewalByClient.get(client.id)
       const event = latestEventByClient.get(client.id)
-      const eventStage = stageFromEvent(event)
+      const eventStage = isXcloudProvisioningFailure(test) ? null : stageFromEvent(event)
       const stage = mostAdvancedStage(mapStage(client.status, test, renewal), eventStage)
       if (String(client.status || '').toLowerCase() === 'active' && stage !== 'pagou') continue
       const app = test?.app_id ? appsById.get(test.app_id) : undefined

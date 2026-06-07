@@ -431,9 +431,54 @@ async function getCurrentTestState(testId: string): Promise<{ status: string | n
 
 async function assertTestStillCurrent(testId: string) {
   const current = await getCurrentTestState(testId)
-  if (current.status !== 'active' || current.legacy_metadata.superseded_by_test_id) {
+  if (!['active', 'pending', 'generating'].includes(String(current.status || '')) || current.legacy_metadata.superseded_by_test_id) {
     throw new TestCreateError(409, 'TEST_SUPERSEDED', 'Esta tentativa foi substituida por uma geracao mais recente. Nenhuma mensagem foi enviada.')
   }
+}
+
+async function markXcloudGenerationReady(input: {
+  testId: string
+  clientId: string
+}) {
+  const database = db()
+  const now = new Date().toISOString()
+  const current = await getCurrentTestState(input.testId)
+  if (!['pending', 'generating', 'active'].includes(String(current.status || '')) || current.legacy_metadata.superseded_by_test_id) return
+
+  const { error: updateTestError } = await database
+    .from('tests')
+    .update({
+      status: 'active',
+      activated_at: now,
+      failed_at: null,
+      legacy_metadata: {
+        ...current.legacy_metadata,
+        xcloud_ready_at: now,
+        pending_xcloud_confirmation: false,
+      },
+    })
+    .eq('id', input.testId)
+  if (updateTestError) throw new TestCreateError(500, 'TEST_READY_UPDATE_FAILED', updateTestError.message)
+
+  const { data: clientData } = await database
+    .from('clients')
+    .select('legacy_metadata')
+    .eq('id', input.clientId)
+    .maybeSingle()
+  const clientMetadata = ((clientData as { legacy_metadata?: JsonRecord } | null)?.legacy_metadata || {}) as JsonRecord
+  const { error: updateClientError } = await database
+    .from('clients')
+    .update({
+      status: 'test_active',
+      legacy_metadata: {
+        ...clientMetadata,
+        latest_test_confirmed_at: now,
+        latest_test_pending_xcloud_confirmation: false,
+      },
+    })
+    .eq('id', input.clientId)
+    .neq('status', 'active')
+  if (updateClientError) throw new TestCreateError(500, 'CLIENT_READY_UPDATE_FAILED', updateClientError.message)
 }
 
 async function markXcloudGenerationFailed(input: {
@@ -452,15 +497,17 @@ async function markXcloudGenerationFailed(input: {
     updated_at: now,
   }
   const current = await getCurrentTestState(input.testId)
-  if (current.status !== 'active' || current.legacy_metadata.superseded_by_test_id) return dispatch
+  if (!['active', 'pending', 'generating'].includes(String(current.status || '')) || current.legacy_metadata.superseded_by_test_id) return dispatch
 
   const { error: updateTestError } = await database
     .from('tests')
     .update({
       status: 'failed',
+      activated_at: null,
       failed_at: now,
       legacy_metadata: {
         ...current.legacy_metadata,
+        pending_xcloud_confirmation: false,
         xcloud_worker: {
           ...((current.legacy_metadata.xcloud_worker && typeof current.legacy_metadata.xcloud_worker === 'object' && !Array.isArray(current.legacy_metadata.xcloud_worker)) ? current.legacy_metadata.xcloud_worker as JsonRecord : {}),
           ...input.worker,
@@ -495,6 +542,7 @@ async function markXcloudGenerationFailed(input: {
           ...clientMetadata,
           latest_failed_test_id: input.testId,
           latest_xcloud_failure_at: now,
+          latest_test_pending_xcloud_confirmation: false,
         },
       })
       .eq('id', input.clientId)
@@ -845,18 +893,20 @@ export async function createGeneratedTest(input: CreateTestInput) {
     const durationMinutes = operationalSettings.test_duration_minutes
     const expiresAt = isoPlusMinutes(durationMinutes, new Date(now))
     const existing = existingClient
+    const requiresXcloudConfirmation = app.key === 'xcloud' && Boolean(deviceKey) && xcloudWorkerEnabled()
 
     const clientPayload = {
       name: clientName,
       phone_e164: phoneE164,
       phone_raw: phoneRaw,
-      status: 'test_active',
+      status: requiresXcloudConfirmation ? (existing?.status || 'lead') : 'test_active',
       source: testMode === 'real' ? 'test_generation_real' : 'test_generation_mock',
       legacy_metadata: {
         ...(existing?.legacy_metadata || {}),
         app_key: app.key,
         panel_key: panel.key,
         latest_test_started_at: startedAt,
+        latest_test_pending_xcloud_confirmation: requiresXcloudConfirmation,
         test_does_not_consume_slot: true,
       },
       updated_at: now,
@@ -878,10 +928,10 @@ export async function createGeneratedTest(input: CreateTestInput) {
       device_key: app.key === 'xcloud' ? deviceKey : null,
       provider: providerName(panel.key),
       provider_code: providerCode || null,
-      status: 'active',
+      status: requiresXcloudConfirmation ? 'generating' : 'active',
       source: testMode === 'real' ? 'test_generation_real' : 'test_generation_mock',
       requested_at: startedAt,
-      activated_at: now,
+      activated_at: requiresXcloudConfirmation ? null : now,
       expires_at: expiresAt,
       legacy_metadata: {
         order_id: providerResult.order_id || null,
@@ -892,6 +942,7 @@ export async function createGeneratedTest(input: CreateTestInput) {
         provider_code: providerCode || null,
         duration_minutes: durationMinutes,
         game_mode_enabled: operationalSettings.game_mode_enabled,
+        pending_xcloud_confirmation: requiresXcloudConfirmation,
         test_does_not_consume_slot: true,
         no_account_created: true,
         no_account_slot_created: true,
@@ -911,7 +962,7 @@ export async function createGeneratedTest(input: CreateTestInput) {
       entity_id: test.id,
       event_type: 'test_created',
       from_status: null,
-      to_status: 'active',
+      to_status: test.status,
       operator_ref: input.operator_ref || null,
       payload: {
         client_id: client.id,
@@ -921,6 +972,7 @@ export async function createGeneratedTest(input: CreateTestInput) {
         order_id: providerResult.order_id || null,
         duration_minutes: durationMinutes,
         game_mode_enabled: operationalSettings.game_mode_enabled,
+        pending_xcloud_confirmation: requiresXcloudConfirmation,
         test_does_not_consume_slot: true,
       },
     })
@@ -995,6 +1047,7 @@ export async function createGeneratedTest(input: CreateTestInput) {
             dispatch,
           })
         }
+        await markXcloudGenerationReady({ testId: test.id, clientId: client.id })
       } catch (workerError) {
         const workerFailure: JsonRecord = {
           status: 'failed',
@@ -1117,7 +1170,7 @@ export async function createGeneratedTest(input: CreateTestInput) {
         client_id: client.id,
         app_key: app.key,
         panel_key: panel.key,
-        status: test.status,
+        status: app.key === 'xcloud' && xcloudWorker?.status === 'success' ? 'active' : test.status,
         order_id: providerResult.order_id || null,
         pedido: providerResult.order_id || null,
         host: providerResult.host || null,

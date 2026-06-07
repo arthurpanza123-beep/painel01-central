@@ -111,6 +111,10 @@ export async function getTestsData(options: TestsQueryOptions = {}): Promise<Tes
 
     const items: Teste[] = Array.from(rowsById.values())
       .filter((test) => !isOperationalNoise(clientsById.get(test.client_id)?.name))
+      .filter((test) => {
+        if (targetTestId && test.id === targetTestId) return true
+        return !['pending', 'generating', 'failed', 'cancelled'].includes(String(test.status || ''))
+      })
       .map((test) => {
       const client = clientsById.get(test.client_id)
       const account = test.account_id ? accountsById.get(test.account_id) : undefined
