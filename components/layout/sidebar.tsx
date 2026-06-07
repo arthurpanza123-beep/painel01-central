@@ -4,15 +4,10 @@ import Image from 'next/image'
 import { cn } from '@/lib/utils'
 import type { NavPage } from '@/app/page'
 import {
-  AlertTriangle,
-  DollarSign,
   Headphones,
   Kanban,
   LayoutDashboard,
-  LogOut,
   RefreshCw,
-  Settings,
-  Terminal,
   TestTube2,
   Users,
   Wallet,
@@ -28,10 +23,6 @@ const NAV_ITEMS: { id: NavPage; label: string; Icon: React.FC<{ className?: stri
   { id: 'clientes', label: 'Clientes', Icon: ({ className }) => <Users className={className} /> },
   { id: 'contas', label: 'Contas / Telas', Icon: ({ className }) => <Wallet className={className} /> },
   { id: 'renovacoes', label: 'Renovações', Icon: ({ className }) => <RefreshCw className={className} /> },
-  { id: 'financeiro', label: 'Financeiro', Icon: ({ className }) => <DollarSign className={className} /> },
-  { id: 'problemas', label: 'Problemas', Icon: ({ className }) => <AlertTriangle className={className} /> },
-  { id: 'configuracoes', label: 'Configurações', Icon: ({ className }) => <Settings className={className} /> },
-  { id: 'debug', label: 'Logs', Icon: ({ className }) => <Terminal className={className} /> },
 ]
 
 interface SidebarProps {
@@ -97,14 +88,6 @@ export function Sidebar({ activePage, onNavigate }: SidebarProps) {
           )
         })}
       </nav>
-
-      <button
-        className="flex h-10 w-full items-center gap-3 rounded-lg px-3 text-sm font-medium transition-all duration-200 text-[color:var(--sidebar-foreground)] hover:text-red-400 hover:bg-white/5 mt-2"
-        aria-label="Sair"
-      >
-        <LogOut className="h-[18px] w-[18px] shrink-0" />
-        <span className="truncate">Sair</span>
-      </button>
     </aside>
   )
 }

@@ -4,16 +4,12 @@ import { useEffect, useState } from 'react'
 import dynamic from 'next/dynamic'
 import { m as motion, AnimatePresence } from 'framer-motion'
 import {
-  AlertTriangle,
   Clock3,
-  DollarSign,
   Headphones,
   Kanban,
   LayoutDashboard,
   Menu,
   RefreshCw,
-  Settings,
-  Terminal,
   TestTube2,
   Users,
   Wallet,
@@ -59,10 +55,6 @@ const NAV_ITEMS: { id: NavPage; label: string; Icon: React.FC<{ className?: stri
   { id: 'clientes', label: 'Clientes', Icon: Users },
   { id: 'contas', label: 'Contas / Telas', Icon: Wallet },
   { id: 'renovacoes', label: 'Renovações', Icon: RefreshCw },
-  { id: 'financeiro', label: 'Financeiro', Icon: DollarSign },
-  { id: 'problemas', label: 'Problemas', Icon: AlertTriangle },
-  { id: 'configuracoes', label: 'Configurações', Icon: Settings },
-  { id: 'debug', label: 'Logs', Icon: Terminal },
 ]
 
 type OperationalSettings = {
