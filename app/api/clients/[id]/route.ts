@@ -7,6 +7,7 @@ import {
   officialPlanLabel,
   type ScreensCount,
 } from '@/lib/services/official-plans'
+import { findAccountForClient, type AccountSharingSlot } from '@/lib/services/account-sharing'
 import { getSupabaseServerClient } from '@/lib/supabase/server'
 
 type JsonRecord = Record<string, unknown>
@@ -35,7 +36,9 @@ type AccountRow = {
   provider_code: string | null
   max_slots: number | null
   expires_at: string | null
+  status: string | null
   legacy_metadata: JsonRecord | null
+  created_at: string | null
 }
 
 type SlotRow = {
@@ -283,13 +286,31 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 
   const { data: accountsData, error: accountsError } = await db
     .from('accounts')
-    .select('id,client_id,app_id,panel_id,username,password_secret,provider,provider_code,max_slots,expires_at,legacy_metadata')
+    .select('id,client_id,app_id,panel_id,username,password_secret,provider,provider_code,max_slots,expires_at,status,legacy_metadata,created_at')
     .eq('client_id', id)
     .order('created_at', { ascending: false })
-    .limit(1)
   if (accountsError) return NextResponse.json({ success: false, error: accountsError.message }, { status: 500 })
 
-  const account = ((accountsData || [])[0] || null) as AccountRow | null
+  const { data: clientSlotsData, error: clientSlotsError } = await db
+    .from('account_slots')
+    .select('id,account_id,client_id,slot_number,status,assigned_at')
+    .eq('client_id', id)
+    .order('assigned_at', { ascending: false })
+  if (clientSlotsError) return NextResponse.json({ success: false, error: clientSlotsError.message }, { status: 500 })
+
+  const clientSlots = (clientSlotsData || []) as AccountSharingSlot[]
+  const slotAccountIds = [...new Set(clientSlots.map((slot) => slot.account_id).filter(Boolean))]
+  const accountsById = new Map(((accountsData || []) as AccountRow[]).map((row) => [row.id, row]))
+  if (slotAccountIds.length) {
+    const { data: slotAccountsData, error: slotAccountsError } = await db
+      .from('accounts')
+      .select('id,client_id,app_id,panel_id,username,password_secret,provider,provider_code,max_slots,expires_at,status,legacy_metadata,created_at')
+      .in('id', slotAccountIds)
+    if (slotAccountsError) return NextResponse.json({ success: false, error: slotAccountsError.message }, { status: 500 })
+    for (const row of (slotAccountsData || []) as AccountRow[]) accountsById.set(row.id, row)
+  }
+
+  const account = findAccountForClient(id, [...accountsById.values()], clientSlots)
   const warnings: string[] = []
   let accountId = account?.id || null
 

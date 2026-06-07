@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Copy, CheckCircle, ArrowRight, ArrowLeft,
@@ -144,6 +144,28 @@ const ETAPAS_GERACAO = [
   { id: 'mensagem',    label: 'Preparando mensagem' },
   { id: 'concluido',   label: 'Concluído' },
 ]
+
+function shouldIgnoreEnterShortcut(event: KeyboardEvent): boolean {
+  if (
+    event.key !== 'Enter' ||
+    event.shiftKey ||
+    event.ctrlKey ||
+    event.altKey ||
+    event.metaKey ||
+    event.isComposing
+  ) {
+    return true
+  }
+
+  const target = event.target
+  if (!(target instanceof HTMLElement)) return false
+
+  const tagName = target.tagName.toLowerCase()
+  if (target.isContentEditable) return true
+  if (tagName === 'textarea' || tagName === 'button' || tagName === 'a' || tagName === 'select') return true
+
+  return false
+}
 
 function initialGenerationSteps(): GenerationProgressStep[] {
   return ETAPAS_GERACAO.map((step, index) => ({ ...step, status: index === 0 ? 'running' : 'pending' }))
@@ -354,21 +376,21 @@ export function GerarTesteWizard() {
     }
   }, [processStep, form])
 
-  const canProceed = (step: WizardStep): boolean => {
-  switch (step) {
-  case 1: return !!form.nome.trim() && !!form.telefone.trim()
-  case 2: return !!form.app
-  case 3: return !!form.servidor
-  default: return true
-  }
-  }
+  const canProceed = useCallback((step: WizardStep): boolean => {
+    switch (step) {
+    case 1: return !!form.nome.trim() && !!form.telefone.trim()
+    case 2: return !!form.app
+    case 3: return !!form.servidor
+    default: return true
+    }
+  }, [form])
 
-  const handleNext = () => {
+  const handleNext = useCallback(() => {
     if (wizardStep < 4 && canProceed(wizardStep)) {
       setDirection(1)
       setWizardStep((prev) => (prev + 1) as WizardStep)
     }
-  }
+  }, [canProceed, wizardStep])
 
   const handleBack = () => {
     if (wizardStep > 1) {
@@ -377,7 +399,7 @@ export function GerarTesteWizard() {
     }
   }
 
-  const handleGerar = () => {
+  const handleGerar = useCallback(() => {
     if (!canProceed(3)) {
       addToast('error', 'Preencha todos os campos')
       return
@@ -387,7 +409,26 @@ export function GerarTesteWizard() {
       return
     }
     setProcessStep('gerando')
-  }
+  }, [addToast, canProceed, form.app, form.deviceKey])
+
+  useEffect(() => {
+    if (processStep) return
+
+    const handleGlobalEnter = (event: KeyboardEvent) => {
+      if (shouldIgnoreEnterShortcut(event)) return
+
+      event.preventDefault()
+      if (wizardStep < 4) {
+        handleNext()
+        return
+      }
+
+      handleGerar()
+    }
+
+    document.addEventListener('keydown', handleGlobalEnter)
+    return () => document.removeEventListener('keydown', handleGlobalEnter)
+  }, [handleGerar, handleNext, processStep, wizardStep])
 
   const handleCopiar = () => {
     if (!teste) return

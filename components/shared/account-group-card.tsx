@@ -102,7 +102,7 @@ export function AccountGroupCard({
                 {vinc.nome.charAt(0)}
               </div>
               <div className="min-w-0 flex-1">
-                <p className="text-xs font-medium text-white truncate">Cliente {i + 1} · {vinc.nome}</p>
+                <p className="text-xs font-medium text-white truncate">Tela {i + 1} · {vinc.nome}</p>
                 <p className="text-[10px] text-slate-500">{vinc.telefone}</p>
               </div>
               <span className="text-[9px] text-slate-600 shrink-0">desde {vinc.criadoEm}</span>

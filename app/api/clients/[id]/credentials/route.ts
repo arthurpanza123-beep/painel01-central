@@ -7,6 +7,7 @@ import {
   type ProviderCatalogEntry,
   type BuiltCredentials,
 } from '@/lib/config/provider-catalog'
+import { findAccountForClient, isOccupiedSlot, type AccountSharingSlot } from '@/lib/services/account-sharing'
 import { getSupabaseServerClient } from '@/lib/supabase/server'
 
 type JsonRecord = Record<string, unknown>
@@ -28,7 +29,10 @@ type AccountRow = {
   app_id: string | null
   panel_id: string | null
   expires_at: string | null
+  status: string | null
+  max_slots: number | null
   legacy_metadata: JsonRecord | null
+  created_at: string | null
 }
 
 function metadataValue(metadata: JsonRecord | null | undefined, keys: string[]): string {
@@ -81,8 +85,8 @@ export async function GET(_request: Request, context: RouteContext) {
 
   const [clientRes, accountsRes, slotsRes, appsRes, panelsRes, renewalsRes] = await Promise.all([
     db.from('clients').select('id,name,phone_e164,status,legacy_metadata').eq('id', id).maybeSingle(),
-    db.from('accounts').select('id,client_id,username,password_secret,m3u_url_secret,hls_url_secret,provider,provider_code,panel_external_id,app_id,panel_id,expires_at,legacy_metadata,created_at').eq('client_id', id).order('created_at', { ascending: false }),
-    db.from('account_slots').select('id,account_id,client_id,slot_number,status').eq('client_id', id),
+    db.from('accounts').select('id,client_id,username,password_secret,m3u_url_secret,hls_url_secret,provider,provider_code,panel_external_id,app_id,panel_id,expires_at,status,max_slots,legacy_metadata,created_at').eq('client_id', id).order('created_at', { ascending: false }),
+    db.from('account_slots').select('id,account_id,client_id,slot_number,status,assigned_at').eq('client_id', id),
     db.from('apps').select('id,name,key'),
     db.from('panels').select('id,name,key'),
     db.from('renewals').select('plan_key,amount_cents,due_at,status').eq('client_id', id).order('created_at', { ascending: false }).limit(1),
@@ -93,8 +97,21 @@ export async function GET(_request: Request, context: RouteContext) {
   }
   if (!clientRes.data) return NextResponse.json({ success: false, error: 'Cliente nao encontrado.' }, { status: 404 })
 
-  const accounts = (accountsRes.data || []) as AccountRow[]
-  const account = accounts[0] || null
+  const directAccounts = (accountsRes.data || []) as AccountRow[]
+  const slots = (slotsRes.data || []) as AccountSharingSlot[]
+  const slotAccountIds = [...new Set(slots.map((slot) => slot.account_id).filter(Boolean))]
+  let accounts = [...directAccounts]
+  if (slotAccountIds.length) {
+    const slotAccountsRes = await db
+      .from('accounts')
+      .select('id,client_id,username,password_secret,m3u_url_secret,hls_url_secret,provider,provider_code,panel_external_id,app_id,panel_id,expires_at,status,max_slots,legacy_metadata,created_at')
+      .in('id', slotAccountIds)
+    if (slotAccountsRes.error) return NextResponse.json({ success: false, error: slotAccountsRes.error.message }, { status: 500 })
+    const byId = new Map(accounts.map((row) => [row.id, row]))
+    for (const row of (slotAccountsRes.data || []) as AccountRow[]) byId.set(row.id, row)
+    accounts = [...byId.values()]
+  }
+  const account = findAccountForClient(id, accounts, slots)
   const appsById = new Map(((appsRes.data || []) as Array<{ id: string; name: string; key: string }>).map((row) => [row.id, row]))
   const panelsById = new Map(((panelsRes.data || []) as Array<{ id: string; name: string; key: string }>).map((row) => [row.id, row]))
   const app = account?.app_id ? appsById.get(account.app_id) : null
@@ -140,7 +157,7 @@ export async function GET(_request: Request, context: RouteContext) {
     return { ...built, credentialText: buildCredentialText(built) }
   })
   const preferred = buildProviderCredentials({ provider: provider.key, app: preferredApp, username, password, host })
-  const hasSlot = Boolean((slotsRes.data || []).length)
+  const hasSlot = slots.some(isOccupiedSlot)
   const warnings: string[] = []
   if (String((clientRes.data as { status?: string | null }).status || '').toLowerCase() === 'active' && !hasSlot) {
     warnings.push('Cliente ativo sem tela/slot vinculado.')
@@ -157,7 +174,7 @@ export async function GET(_request: Request, context: RouteContext) {
       host,
       m3u: m3u || preferred.m3uUrl,
       hls: hls || preferred.hlsUrl,
-      expiresAt: account.expires_at || renewal?.due_at || null,
+      expiresAt: renewal?.due_at || account.expires_at || null,
       hasSlot,
     },
     selectedApp: app ? { key: app.key, name: app.name } : null,

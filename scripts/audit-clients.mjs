@@ -61,6 +61,18 @@ function isActiveStatus(status) {
   return ['active', 'test_active', 'ativo'].includes(String(status || '').toLowerCase())
 }
 
+function isOperationalAccount(account) {
+  const metadata = account?.legacy_metadata && typeof account.legacy_metadata === 'object' && !Array.isArray(account.legacy_metadata)
+    ? account.legacy_metadata
+    : {}
+  if (metadata.merged_into_account_id || metadata.merged_reason === 'shared_two_screen_account_mirror') return false
+  return ['active', 'provisioning'].includes(String(account?.status || 'active').toLowerCase())
+}
+
+function isOccupiedSlot(slot) {
+  return String(slot?.status || '').toLowerCase() === 'occupied' || Boolean(slot?.client_id)
+}
+
 function latestBy(rows, key, dateKeys) {
   const map = new Map()
   for (const row of rows) {
@@ -182,6 +194,7 @@ async function main() {
     latestRenewalByClient: latestBy(renewals, 'client_id', ['confirmed_at', 'created_at', 'due_at']),
     latestTestByClient: latestBy(tests, 'client_id', ['created_at', 'activated_at', 'expires_at']),
   }
+  context.accountById = new Map(accounts.map((row) => [row.id, row]))
 
   for (const account of accounts) {
     if (!account.client_id) continue
@@ -215,6 +228,7 @@ async function main() {
   for (const [type, groups] of [['phone', byPhone], ['username', byUsername], ['name', byName]]) {
     for (const [key, group] of groups.entries()) {
       if (!key || group.length < 2) continue
+      if (type === 'username' && isSharedTwoScreenUsernameGroup(key, group, context)) continue
       const ranked = group
         .map((client) => ({ client, score: scoreClient(client, context), summary: summarizeClient(client, context) }))
         .sort((a, b) => b.score - a.score || String(b.summary.due_at).localeCompare(String(a.summary.due_at)))
@@ -330,6 +344,25 @@ async function main() {
     brena_count: brena.length,
   }
   console.log(JSON.stringify(printable, null, 2))
+}
+
+function isSharedTwoScreenUsernameGroup(_key, group, context) {
+  if (group.length !== 2) return false
+  const clientIds = new Set(group.map((client) => client.id))
+  const occupiedSlots = []
+  for (const client of group) {
+    const slots = (context.slotsByClient.get(client.id) || []).filter(isOccupiedSlot)
+    if (slots.length !== 1) return false
+    occupiedSlots.push(slots[0])
+  }
+  const accountIds = new Set(occupiedSlots.map((slot) => slot.account_id))
+  if (accountIds.size !== 1) return false
+  const account = context.accountById.get([...accountIds][0])
+  if (!account || !isOperationalAccount(account) || Number(account.max_slots || 1) < 2) return false
+  const accountSlots = (context.slotsByClient ? [...context.slotsByClient.values()].flat() : [])
+    .filter((slot) => slot.account_id === account.id && isOccupiedSlot(slot))
+  const accountClientIds = new Set(accountSlots.map((slot) => slot.client_id).filter(Boolean))
+  return clientIds.size === accountClientIds.size && [...clientIds].every((id) => accountClientIds.has(id))
 }
 
 main().catch((error) => {

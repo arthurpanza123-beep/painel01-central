@@ -5,6 +5,7 @@ import { maskPassword, maskPhone, maskUsername } from '@/lib/services/masking'
 import { formatDateBR } from '@/lib/services/date-normalizer'
 import { normalizeScreensCount, officialPlanLabel } from '@/lib/services/official-plans'
 import { isOperationalNoise } from '@/lib/services/operational-window'
+import { findAccountForClient, findSlotForClient } from '@/lib/services/account-sharing'
 import { getSupabaseServerClient, isSupabaseServerConfigured } from '@/lib/supabase/server'
 
 export type ClientsQueryResult = {
@@ -37,6 +38,17 @@ type AccountRow = {
   app_id: string | null
   panel_id: string | null
   legacy_metadata: Record<string, unknown> | null
+  created_at: string | null
+}
+
+type SlotRow = {
+  id: string
+  account_id: string
+  client_id: string | null
+  slot_number: number | null
+  status: string | null
+  assigned_at: string | null
+  expires_at: string | null
 }
 
 type RenewalRow = {
@@ -132,9 +144,10 @@ export async function getClientsData(): Promise<ClientsQueryResult> {
   if (!db) return { data_source: 'mock', items: buildMockItems() }
 
   try {
-    const [clientsRes, accountsRes, renewalsRes, appsRes, panelsRes] = await Promise.all([
+    const [clientsRes, accountsRes, slotsRes, renewalsRes, appsRes, panelsRes] = await Promise.all([
       db.from('clients').select('id,name,phone_e164,status,source,notes,created_at,legacy_metadata').order('created_at', { ascending: true }),
-      db.from('accounts').select('id,client_id,username,password_secret,max_slots,status,expires_at,panel_external_id,provider,provider_code,app_id,panel_id,legacy_metadata').order('created_at', { ascending: true }),
+      db.from('accounts').select('id,client_id,username,password_secret,max_slots,status,expires_at,panel_external_id,provider,provider_code,app_id,panel_id,legacy_metadata,created_at').order('created_at', { ascending: true }),
+      db.from('account_slots').select('id,account_id,client_id,slot_number,status,assigned_at,expires_at').order('slot_number', { ascending: true }),
       db.from('renewals').select('id,client_id,plan_key,amount_cents,status,due_at,metadata').order('created_at', { ascending: true }),
       db.from('apps').select('id,name,key'),
       db.from('panels').select('id,name,key'),
@@ -142,25 +155,28 @@ export async function getClientsData(): Promise<ClientsQueryResult> {
 
     if (clientsRes.error) throw new Error(clientsRes.error.message)
     if (accountsRes.error) throw new Error(accountsRes.error.message)
+    if (slotsRes.error) throw new Error(slotsRes.error.message)
     if (renewalsRes.error) throw new Error(renewalsRes.error.message)
     if (appsRes.error) throw new Error(appsRes.error.message)
     if (panelsRes.error) throw new Error(panelsRes.error.message)
 
     const appsById = new Map((appsRes.data as AppRow[] || []).map((row) => [row.id, row]))
     const panelsById = new Map((panelsRes.data as PanelRow[] || []).map((row) => [row.id, row]))
-    const accountByClientId = new Map((accountsRes.data as AccountRow[] || []).map((row) => [row.client_id || '', row]))
+    const accounts = (accountsRes.data as AccountRow[] || [])
+    const slots = (slotsRes.data as SlotRow[] || [])
     const renewalByClientId = new Map((renewalsRes.data as RenewalRow[] || []).map((row) => [row.client_id || '', row]))
 
     const items: Cliente[] = (clientsRes.data as ClientRow[] || [])
       .filter(isMainOperationalClient)
       .map((client) => {
-      const account = accountByClientId.get(client.id)
+      const account = findAccountForClient(client.id, accounts, slots)
+      const slot = findSlotForClient(client.id, slots)
       const renewal = renewalByClientId.get(client.id)
       const app = account?.app_id ? appsById.get(account.app_id) : null
       const panel = account?.panel_id ? panelsById.get(account.panel_id) : null
       const appName = app?.name || account?.provider || 'Aplicativo'
       const serverName = panel?.name || providerDisplayName(account?.provider) || 'Servidor'
-      const dueDate = renewal?.due_at || account?.expires_at || client.created_at || ''
+      const dueDate = renewal?.due_at || slot?.expires_at || account?.expires_at || client.created_at || ''
       const inferredTwoScreens = account?.max_slots === 2 && Number(renewal?.amount_cents || 0) >= 3000 ? 2 : 1
       const screensCount = normalizeScreensCount(
         metadataNumber(renewal?.metadata, 'screens_count') ??
