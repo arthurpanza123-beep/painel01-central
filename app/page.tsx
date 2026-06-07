@@ -170,7 +170,7 @@ export default function App() {
       >
         <Menu className="h-5 w-5" />
       </button>
-      <MobileNav open={mobileMenuOpen} activePage={page} onClose={() => setMobileMenuOpen(false)} onNavigate={navigate} />
+      <MobileNav open={mobileMenuOpen} activePage={page} onClose={() => setMobileMenuOpen(false)} onNavigate={navigate} settings={settings} busy={settingsBusy} onToggleGameMode={toggleGameMode} />
       <GameModeConfirmModal
         open={confirmGameModeOpen}
         busy={settingsBusy}
@@ -198,36 +198,65 @@ export default function App() {
 function GameModeToggle({ settings, busy, onToggle }: { settings: OperationalSettings; busy: boolean; onToggle: () => void }) {
   const active = settings.game_mode_enabled
   return (
-	    <button
-	      onClick={onToggle}
-	      disabled={busy}
-	      className="fixed left-[calc(12px+env(safe-area-inset-left))] md:left-[228px] flex items-center gap-2 rounded-xl px-3 py-2 text-left transition-all disabled:opacity-70"
-	      style={{
-	        top: 'calc(12px + env(safe-area-inset-top))',
-	        zIndex: 9998,
-        background: active ? 'rgba(245,158,11,0.18)' : 'rgba(15,23,42,0.88)',
-        border: active ? '1px solid rgba(245,158,11,0.38)' : '1px solid rgba(148,163,184,0.22)',
-        color: active ? '#fde68a' : '#cbd5e1',
-        boxShadow: active ? '0 0 14px rgba(245,158,11,0.16)' : '0 8px 22px rgba(0,0,0,0.26)',
-        backdropFilter: 'blur(6px)',
+    <button
+      onClick={onToggle}
+      disabled={busy}
+      className="hidden md:flex fixed items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors disabled:opacity-70"
+      style={{
+        top: 'calc(12px + env(safe-area-inset-top))',
+        right: 'calc(16px + env(safe-area-inset-right))',
+        zIndex: 40,
+        background: active ? 'rgba(245,158,11,0.14)' : 'rgba(255,255,255,0.04)',
+        border: active ? '1px solid rgba(245,158,11,0.30)' : '1px solid var(--border)',
+        color: active ? '#fcd34d' : '#94a3b8',
       }}
       aria-pressed={active}
-      title={active ? 'HORÁRIO DE JOGO: ON' : 'HORÁRIO DE JOGO: OFF'}
+      title={active ? 'Horário de jogo: ON - testes 45min' : 'Horário de jogo: OFF - testes 1h15'}
     >
-      <Clock3 className="h-4 w-4" />
-      <span className="hidden text-[11px] font-bold uppercase tracking-wider sm:inline">
-        HORÁRIO DE JOGO: {active ? 'ON' : 'OFF'}
-      </span>
-      <span className="text-[11px] font-semibold">{active ? 'Teste 45 min' : 'Teste 1h15'}</span>
+      <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: active ? '#f59e0b' : '#64748b' }} />
+      <Clock3 className="h-3.5 w-3.5" />
+      <span className="text-[11px] font-semibold">Horário de jogo: {active ? 'ON · 45min' : 'OFF · 1h15'}</span>
     </button>
   )
 }
 
-function MobileNav({ open, activePage, onClose, onNavigate }: {
+function GameModeMobileRow({ settings, busy, onToggle }: { settings: OperationalSettings; busy: boolean; onToggle: () => void }) {
+  const active = settings.game_mode_enabled
+  return (
+    <button
+      onClick={onToggle}
+      disabled={busy}
+      className="mb-3 flex w-full items-center justify-between gap-3 rounded-xl px-3 py-3 text-left transition-colors disabled:opacity-70"
+      style={{
+        background: active ? 'rgba(245,158,11,0.12)' : 'rgba(255,255,255,0.035)',
+        border: active ? '1px solid rgba(245,158,11,0.30)' : '1px solid var(--border)',
+      }}
+      aria-pressed={active}
+    >
+      <span className="flex min-w-0 items-center gap-2.5">
+        <Clock3 className="h-4 w-4 shrink-0" style={{ color: active ? '#fcd34d' : '#94a3b8' }} />
+        <span className="min-w-0">
+          <span className="block text-sm font-medium text-white">Horário de jogo</span>
+          <span className="block text-[11px]" style={{ color: active ? '#fcd34d' : '#64748b' }}>
+            {active ? 'Ligado - novos testes 45min' : 'Desligado - novos testes 1h15'}
+          </span>
+        </span>
+      </span>
+      <span className="relative h-6 w-11 shrink-0 rounded-full transition-colors" style={{ background: active ? '#f59e0b' : 'rgba(148,163,184,0.3)' }}>
+        <span className="absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all" style={{ left: active ? '22px' : '2px' }} />
+      </span>
+    </button>
+  )
+}
+
+function MobileNav({ open, activePage, onClose, onNavigate, settings, busy, onToggleGameMode }: {
   open: boolean
   activePage: NavPage
   onClose: () => void
   onNavigate: (page: NavPage) => void
+  settings: OperationalSettings
+  busy: boolean
+  onToggleGameMode: () => void
 }) {
   return (
     <AnimatePresence>
@@ -262,6 +291,7 @@ function MobileNav({ open, activePage, onClose, onNavigate }: {
                 <X className="h-4 w-4" />
               </button>
             </div>
+            <GameModeMobileRow settings={settings} busy={busy} onToggle={onToggleGameMode} />
             <div className="grid grid-cols-2 gap-2">
               {NAV_ITEMS.map(({ id, label, Icon }) => {
                 const active = activePage === id

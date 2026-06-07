@@ -106,10 +106,6 @@ export function RenovacoesPage() {
         <p className="text-slate-500 text-sm">
           {urgentes} urgentes · R$ {valorTotal.toFixed(0)} a receber
         </p>
-        <p className="mt-2 inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-medium"
-           style={{ background: dataSource === 'supabase' ? 'rgba(34,197,94,0.12)' : 'rgba(245,158,11,0.12)', color: dataSource === 'supabase' ? '#4ade80' : '#fbbf24' }}>
-          Fonte: {dataSource === 'supabase' ? 'Supabase' : 'Mock'}
-        </p>
       </div>
 
       {/* KPIs */}
@@ -142,7 +138,7 @@ export function RenovacoesPage() {
             <div key={grupo.id}>
               <div className="flex items-center justify-between mb-3 px-1">
                 <div className="flex items-center gap-2">
-                  <span className="h-2 w-2 rounded-full" style={{ background: grupo.color, boxShadow: `0 0 8px ${grupo.color}` }} />
+                  <span className="h-2 w-2 rounded-full" style={{ background: grupo.color }} />
                   <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: grupo.color }}>
                     {grupo.label}
                   </span>

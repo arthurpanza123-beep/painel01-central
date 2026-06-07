@@ -85,10 +85,6 @@ function BigKPI({
       className="relative rounded-2xl p-5 overflow-hidden"
       style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
     >
-      <div
-        className="absolute -top-10 -right-10 h-28 w-28 rounded-full opacity-20"
-        style={{ background: `radial-gradient(circle, ${color}, transparent 70%)` }}
-      />
       <div className="relative">
         <div
           className="flex h-9 w-9 items-center justify-center rounded-lg mb-4"
@@ -185,7 +181,7 @@ export function FinanceiroPage() {
 
   // Conversões (funil resumido)
   const conversoes = [
-    { label: 'Conversão hoje', value: fin.conversaoDia, color: '#a78bfa' },
+    { label: 'Conversão hoje', value: fin.conversaoDia, color: '#14b8a6' },
     { label: 'Testes → pagos', value: fin.testesPagos && fin.testesAtivosHoje ? (fin.testesPagos / (fin.testesPagos + fin.testesAtivosHoje)) * 100 : fin.conversaoDia, color: '#22c55e' },
   ]
 
@@ -220,17 +216,13 @@ export function FinanceiroPage() {
         </div>
         <h1 className="text-3xl font-bold text-white mb-2" style={{ fontFamily: 'var(--font-display)' }}>Financeiro</h1>
         <p className="text-slate-500">Receita, conversões e saúde dos painéis</p>
-        <p className="mt-2 inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-medium"
-           style={{ background: finance.data_source === 'supabase' ? 'rgba(34,197,94,0.12)' : 'rgba(245,158,11,0.12)', color: finance.data_source === 'supabase' ? '#4ade80' : '#fbbf24' }}>
-          Fonte: {finance.data_source === 'supabase' ? 'Supabase' : 'Mock'}
-        </p>
       </motion.div>
 
       {/* KPIs grandes */}
       <div className="w-full max-w-4xl grid grid-cols-2 lg:grid-cols-4 gap-3 mb-8">
         <BigKPI label="Recebido no mês" value={`R$ ${fin.receitaMesAtual.toFixed(0)}`} color="#22c55e" sub="pagamentos confirmados" icon={DollarSign} />
         <BigKPI label="Renovação mensal prevista" value={`R$ ${(fin.renovacaoMensalPrevista ?? fin.receitaPrevista30d).toFixed(0)}`} color="#60a5fa" sub={`${fin.clientesContados ?? fin.renovacoesPrevistas} clientes contados`} icon={TrendingUp} />
-        <BigKPI label="Lucro estimado" value={`R$ ${fin.lucroEstimado.toFixed(0)}`} color="#a78bfa" icon={Target} />
+        <BigKPI label="Lucro estimado" value={`R$ ${fin.lucroEstimado.toFixed(0)}`} color="#14b8a6" icon={Target} />
         <BigKPI label="Ticket médio" value={`R$ ${fin.ticketMedio.toFixed(0)}`} color="#f59e0b" icon={Wallet} />
       </div>
 
@@ -251,7 +243,7 @@ export function FinanceiroPage() {
                   label={p.plano}
                   value={p.valor}
                   max={maxPlano}
-                  color={['#22c55e', '#60a5fa', '#a78bfa', '#f59e0b'][i % 4]}
+                  color={['#22c55e', '#60a5fa', '#14b8a6', '#f59e0b'][i % 4]}
                 />
               ))
             )}
@@ -260,7 +252,7 @@ export function FinanceiroPage() {
 
         <div className="rounded-2xl p-6" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
           <div className="flex items-center gap-2 mb-5">
-            <Target className="h-4 w-4" style={{ color: '#a78bfa' }} />
+            <Target className="h-4 w-4" style={{ color: '#14b8a6' }} />
             <h2 className="text-sm font-semibold text-white">Conversões</h2>
           </div>
           <div className="space-y-4">
@@ -292,7 +284,7 @@ export function FinanceiroPage() {
             <Bar label="Mensal prev." value={fin.renovacaoMensalPrevista ?? 0} max={maxProjecao} color="#22c55e" />
             <Bar label="Próx. 30d" value={fin.receitaPrevista30d} max={maxProjecao} color="#f59e0b" />
             <Bar label="Proj. 60d" value={fin.receitaPrevista60d} max={maxProjecao} color="#60a5fa" />
-            <Bar label="Proj. 90d" value={fin.receitaPrevista90d} max={maxProjecao} color="#a78bfa" />
+            <Bar label="Proj. 90d" value={fin.receitaPrevista90d} max={maxProjecao} color="#14b8a6" />
           </div>
         </div>
       </div>

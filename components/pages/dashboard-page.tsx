@@ -71,7 +71,7 @@ export function DashboardPage({ onNavigate, metrics }: DashboardPageProps) {
     : [
         { label: 'Leads',     value: pipe.novo_lead + pipe.contato,    color: '#3b82f6' },
         { label: 'Testando',  value: pipe.teste_gerado + pipe.testando, color: '#f59e0b' },
-        { label: 'Interesse', value: pipe.interessado,                  color: '#a78bfa' },
+        { label: 'Interesse', value: pipe.interessado,                  color: '#60a5fa' },
         { label: 'Pagaram',   value: pipe.pagou,                        color: '#22c55e' },
         { label: 'Ativados',  value: pipe.ativado,                      color: '#14b8a6' },
       ]
@@ -83,8 +83,8 @@ export function DashboardPage({ onNavigate, metrics }: DashboardPageProps) {
 
   const kpis = [
     { label: 'Testes ativos',      value: testesAtivos,   icon: TestTube2, color: '#3b82f6', page: 'testes'   as NavPage },
-    { label: 'Gerados hoje',       value: testesHoje,     icon: Zap,       color: '#f59e0b', page: 'testes'   as NavPage },
-    { label: 'Operação hoje',      value: operacaoHoje,   icon: ClipboardList, color: '#a78bfa', page: 'pipeline' as NavPage },
+    { label: 'Testes hoje',        value: testesHoje,     icon: Zap,       color: '#f59e0b', page: 'testes'   as NavPage },
+    { label: 'Leads no funil',     value: operacaoHoje,   icon: ClipboardList, color: '#14b8a6', page: 'pipeline' as NavPage },
     { label: 'Clientes ativos',    value: clientesAtivos, icon: Users,     color: '#22c55e', page: 'clientes' as NavPage },
   ]
 
@@ -114,14 +114,10 @@ export function DashboardPage({ onNavigate, metrics }: DashboardPageProps) {
               onClick={() => onNavigate(k.page)}
               initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
               transition={{ delay: i * 0.05 }}
-              whileHover={{ y: -3 }}
+              whileHover={{ y: -2 }}
               className="text-left rounded-2xl p-5 group relative overflow-hidden"
               style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
             >
-              <div
-                className="absolute -top-8 -right-8 h-24 w-24 rounded-full opacity-20 transition-opacity group-hover:opacity-40"
-                style={{ background: `radial-gradient(circle, ${k.color}, transparent 70%)` }}
-              />
               <div
                 className="flex h-10 w-10 items-center justify-center rounded-xl mb-4"
                 style={{ background: `${k.color}1f`, border: `1px solid ${k.color}40` }}
@@ -143,10 +139,6 @@ export function DashboardPage({ onNavigate, metrics }: DashboardPageProps) {
             className="lg:col-span-2 rounded-2xl p-6 relative overflow-hidden"
             style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
           >
-            <div
-              className="absolute -bottom-16 -left-10 h-48 w-48 rounded-full opacity-20"
-              style={{ background: 'radial-gradient(circle, #22c55e, transparent 70%)' }}
-            />
             <div className="relative flex items-start justify-between mb-5">
               <div>
                 <p className="text-xs text-slate-500 mb-1">Renovação mensal prevista</p>
@@ -198,7 +190,7 @@ export function DashboardPage({ onNavigate, metrics }: DashboardPageProps) {
             style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
           >
             <div className="flex items-center gap-2 mb-4">
-              <Wallet className="h-4 w-4" style={{ color: '#a78bfa' }} />
+              <Wallet className="h-4 w-4" style={{ color: '#14b8a6' }} />
               <span className="text-xs text-slate-500">Créditos disponíveis</span>
             </div>
             <p className="text-3xl font-bold text-white mb-4" style={{ fontFamily: 'var(--font-display)' }}>
@@ -232,17 +224,6 @@ export function DashboardPage({ onNavigate, metrics }: DashboardPageProps) {
               <h2 className="text-sm font-semibold text-white">Hoje na operação</h2>
             </div>
             <div className="flex items-center gap-3">
-              {/* Indicador de fonte de dados — MOCK = laranja, Supabase = verde */}
-              <span
-                className="text-[10px] px-2 py-0.5 rounded-full font-medium"
-                style={{
-                  background: dashboardMetrics?.data_source === 'supabase' ? 'rgba(34,197,94,0.12)' : 'rgba(245,158,11,0.12)',
-                  color:      dashboardMetrics?.data_source === 'supabase' ? '#4ade80' : '#fbbf24',
-                  border:     `1px solid ${dashboardMetrics?.data_source === 'supabase' ? 'rgba(34,197,94,0.25)' : 'rgba(245,158,11,0.25)'}`,
-                }}
-              >
-                {dashboardMetrics?.data_source === 'supabase' ? 'Supabase' : 'Mock'}
-              </span>
               <button
                 onClick={() => onNavigate('pipeline')}
                 className="text-xs text-slate-500 hover:text-white transition-colors flex items-center gap-1"
@@ -275,20 +256,6 @@ export function DashboardPage({ onNavigate, metrics }: DashboardPageProps) {
 function BgGlow() {
   return (
     <div className="pointer-events-none absolute inset-0 overflow-hidden" style={{ zIndex: 0 }}>
-      <div
-        className="absolute hidden rounded-full md:block"
-        style={{
-          width: 600, height: 600, top: '-15%', left: '-10%',
-          background: 'radial-gradient(circle, rgba(37,99,235,0.10) 0%, transparent 65%)',
-        }}
-      />
-      <div
-        className="absolute hidden rounded-full md:block"
-        style={{
-          width: 500, height: 500, top: '20%', right: '-12%',
-          background: 'radial-gradient(circle, rgba(34,197,94,0.06) 0%, transparent 65%)',
-        }}
-      />
       <div
         className="absolute inset-0"
         style={{

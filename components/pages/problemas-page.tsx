@@ -97,7 +97,7 @@ function EventoRow({
                 <button
                   onClick={onCodex}
                   className="h-8 px-3 rounded-lg text-xs font-medium flex items-center gap-1.5"
-                  style={{ background: 'rgba(167,139,250,0.1)', color: '#a78bfa', border: '1px solid rgba(167,139,250,0.2)' }}
+                  style={{ background: 'rgba(20,184,166,0.1)', color: '#14b8a6', border: '1px solid rgba(20,184,166,0.2)' }}
                 >
                   <Cpu className="h-3.5 w-3.5" /> Enviar para Codex
                 </button>
@@ -187,7 +187,7 @@ data/hora: ${problema.criadoEm}${obs ? `\nobservacao: ${obs}` : ''}`
       >
         <div className="p-5 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border)' }}>
           <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-xl flex items-center justify-center" style={{ background: 'rgba(167,139,250,0.12)', color: '#a78bfa' }}>
+            <div className="h-10 w-10 rounded-xl flex items-center justify-center" style={{ background: 'rgba(20,184,166,0.12)', color: '#14b8a6' }}>
               <Cpu className="h-5 w-5" />
             </div>
             <div>
@@ -216,8 +216,8 @@ data/hora: ${problema.criadoEm}${obs ? `\nobservacao: ${obs}` : ''}`
             </div>
           )}
           {phase === 'review' && (
-            <div className="rounded-xl p-4" style={{ background: 'rgba(167,139,250,0.08)', border: '1px solid rgba(167,139,250,0.2)' }}>
-              <p className="mb-3 text-xs font-semibold uppercase tracking-wider" style={{ color: '#c4b5fd' }}>Resposta do Codex</p>
+            <div className="rounded-xl p-4" style={{ background: 'rgba(20,184,166,0.08)', border: '1px solid rgba(20,184,166,0.2)' }}>
+              <p className="mb-3 text-xs font-semibold uppercase tracking-wider" style={{ color: '#5eead4' }}>Resposta do Codex</p>
               <div className="space-y-2">
                 {sugestao.map((line) => <p key={line} className="text-sm text-slate-200">{line}</p>)}
               </div>
@@ -245,7 +245,7 @@ data/hora: ${problema.criadoEm}${obs ? `\nobservacao: ${obs}` : ''}`
           {phase === 'compose' && <button
             onClick={() => setPhase('review')}
             className="flex-1 h-10 rounded-xl text-sm font-semibold flex items-center justify-center gap-2"
-            style={{ background: '#a78bfa', color: '#1a0b2e' }}
+            style={{ background: '#14b8a6', color: '#04201c' }}
           >
             <Send className="h-4 w-4" /> Analisar com Codex
           </button>}
@@ -313,16 +313,12 @@ export function ProblemasPage() {
         {/* Header */}
         <div className="text-center mb-8 max-w-xl">
           <div className="flex items-center justify-center gap-2 mb-3">
-            <Terminal className="h-4 w-4" style={{ color: '#a78bfa' }} />
+            <Terminal className="h-4 w-4" style={{ color: '#14b8a6' }} />
             <span className="text-xs text-slate-500 uppercase tracking-widest font-medium">Central de suporte tecnico</span>
           </div>
           <h1 className="text-2xl font-bold text-white mb-2" style={{ fontFamily: 'var(--font-display)' }}>Problemas</h1>
           <p className="text-slate-500 text-sm">
             {metricas.abertos} abertos · {metricas.emAnalise} em analise · {metricas.resolvidos} resolvidos
-          </p>
-          <p className="mt-2 inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-medium"
-             style={{ background: dataSource === 'supabase' ? 'rgba(34,197,94,0.12)' : 'rgba(245,158,11,0.12)', color: dataSource === 'supabase' ? '#4ade80' : '#fbbf24' }}>
-            Fonte: {dataSource === 'supabase' ? 'Supabase' : 'Mock'}
           </p>
         </div>
 
@@ -358,7 +354,7 @@ export function ProblemasPage() {
               className="px-4 h-9 rounded-xl text-xs font-medium transition-all"
               style={
                 filter === f.id
-                  ? { background: 'rgba(167,139,250,0.15)', border: '1px solid rgba(167,139,250,0.25)', color: '#a78bfa' }
+                  ? { background: 'rgba(20,184,166,0.15)', border: '1px solid rgba(20,184,166,0.25)', color: '#14b8a6' }
                   : { background: 'var(--card)', border: '1px solid var(--border)', color: '#64748b' }
               }
             >

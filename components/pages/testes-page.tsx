@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   TestTube2, Search, Clock, Eye, Zap, ExternalLink,
-  AlertTriangle, Copy, X, Loader2
+  Copy, X, Loader2
 } from 'lucide-react'
 import {
   MOCK_TESTES,
@@ -108,12 +108,6 @@ function TesteCard({
         boxShadow: highlighted ? '0 0 0 3px rgba(96,165,250,0.16)' : undefined,
       }}
     >
-      {isAtivo && urgente && (
-        <div
-          className="absolute -top-10 -right-10 hidden h-28 w-28 rounded-full opacity-20 sm:block"
-          style={{ background: 'radial-gradient(circle, #ef4444, transparent 70%)' }}
-        />
-      )}
       <div className="relative flex items-start gap-4">
         {/* Countdown grande */}
         <div className="text-center shrink-0 min-w-[84px]">
@@ -131,7 +125,7 @@ function TesteCard({
                   {remaining}
                 </p>
               </div>
-              <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-2">restante</p>
+              <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-2">expira sozinho</p>
               {/* barra de progresso */}
               <div className="h-1 w-full rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.06)' }}>
                 <motion.div
@@ -171,9 +165,19 @@ function TesteCard({
                 XCloud
               </span>
             )}
-            {teste.durationMinutes && (
-              <span className="text-[10px] font-medium px-2 py-0.5 rounded-full shrink-0" style={{ background: 'rgba(245,158,11,0.12)', color: '#fbbf24' }}>
-                {teste.durationMinutes} min
+            {isAtivo && teste.durationMinutes && (
+              <span className="text-[10px] font-medium px-2 py-0.5 rounded-full shrink-0" style={{ background: 'rgba(148,163,184,0.1)', color: '#94a3b8' }}>
+                {teste.gameModeDuration ? 'Auto 45 min · horário de jogo' : `Auto ${teste.durationMinutes} min`}
+              </span>
+            )}
+            {isAtivo && isXCloud && (
+              <span className="text-[10px] font-medium px-2 py-0.5 rounded-full shrink-0" style={{ background: 'rgba(20,184,166,0.12)', color: '#2dd4bf' }}>
+                remoção automática ao expirar
+              </span>
+            )}
+            {isAtivo && !isXCloud && (
+              <span className="text-[10px] font-medium px-2 py-0.5 rounded-full shrink-0" style={{ background: 'rgba(148,163,184,0.1)', color: '#94a3b8' }}>
+                encerrar no painel ao expirar
               </span>
             )}
             {isExpirado && teste.xcloudRemoved && (
@@ -185,6 +189,13 @@ function TesteCard({
           <p className="text-xs text-slate-500 mb-3">
             {teste.app} · {teste.servidor} · {teste.telefone}
           </p>
+          {isFinalizado && (
+            <p className="text-[11px] text-slate-500 mb-3 -mt-2">
+              {isXCloud
+                ? (teste.xcloudRemoved ? 'Figurinha enviada · XCloud removido automaticamente' : 'Encerrado · figurinha enviada')
+                : 'Encerrado · figurinha enviada · encerrar usuário no painel'}
+            </p>
+          )}
 
           <div className="flex items-center gap-2 flex-wrap">
             <button
@@ -203,11 +214,12 @@ function TesteCard({
               <button
                 onClick={onExpirar}
                 disabled={isExpiring}
-                className="h-7 px-3 rounded-lg text-[11px] font-medium flex items-center gap-1.5 transition-all disabled:cursor-not-allowed disabled:opacity-70"
-                style={{ background: 'rgba(239,68,68,0.1)', color: '#f87171', border: '1px solid rgba(239,68,68,0.2)' }}
+                className="h-7 px-2.5 rounded-lg text-[11px] font-medium flex items-center gap-1.5 transition-colors disabled:cursor-not-allowed disabled:opacity-70 ml-auto"
+                style={{ background: 'transparent', color: '#64748b', border: '1px solid var(--border)' }}
+                title="Encerrar agora (o sistema já encerra sozinho ao expirar)"
               >
-                {isExpiring ? <Loader2 className="h-3 w-3 animate-spin" /> : <AlertTriangle className="h-3 w-3" />}
-                {isExpiring ? 'Expirando...' : 'Expirar e enviar figurinha'}
+                {isExpiring ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+                {isExpiring ? 'Encerrando...' : 'Encerrar agora'}
               </button>
             )}
             {isFinalizado && (
@@ -410,27 +422,23 @@ export function TestesPage() {
       <div className="text-center mb-8 max-w-xl">
         <div className="flex items-center justify-center gap-2 mb-3">
           <Clock className="h-4 w-4" style={{ color: '#60a5fa' }} />
-          <span className="text-xs text-slate-500 uppercase tracking-widest font-medium">Testes do dia</span>
+          <span className="text-xs text-slate-500 uppercase tracking-widest font-medium">Acompanhando testes</span>
         </div>
         <h1 className="text-2xl font-bold text-white mb-2" style={{ fontFamily: 'var(--font-display)' }}>
-          Testes do dia
+          Testes
         </h1>
         <p className="text-slate-500 text-sm">
           {metricas.testesAtivos} testando
           {metricas.testesExpirados > 0 && ` · ${metricas.testesExpirados} expirados`}
           {metricas.testesConvertidos > 0 && ` · ${metricas.testesConvertidos} convertidos`}
 	        </p>
-	        <p className="text-[10px] text-slate-600 mt-1">A duração vem do próprio teste: 45 min em horário de jogo ou 1h15 no modo normal.</p>
+	        <p className="text-[11px] text-slate-600 mt-1">Os testes encerram automaticamente: 45 min em horário de jogo ou 1h15 no modo normal.</p>
 	        {selectedLinkTestId && (
 	          <p className="mt-2 inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-medium"
 	             style={{ background: 'rgba(96,165,250,0.12)', color: '#93c5fd', border: '1px solid rgba(96,165,250,0.18)' }}>
 	            Teste selecionado pelo link
 	          </p>
 	        )}
-	        <p className="mt-2 inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-medium"
-	           style={{ background: dataSource === 'supabase' ? 'rgba(34,197,94,0.12)' : 'rgba(245,158,11,0.12)', color: dataSource === 'supabase' ? '#4ade80' : '#fbbf24' }}>
-	          Fonte: {dataSource === 'supabase' ? 'Supabase' : 'Mock'}
-	        </p>
       </div>
 
       {/* KPIs compactos */}

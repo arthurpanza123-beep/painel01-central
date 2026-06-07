@@ -369,7 +369,7 @@ export function ClientesPage() {
     { label: 'Codex IA', icon: Sparkles, onClick: () => {
       navigator.clipboard.writeText(`Cliente: ${c.nome}\nTelefone: ${c.telefone}\nApp: ${c.app}\nServidor: ${c.servidor}\nPlano: ${c.plano}\nVencimento: ${c.vencimento}\n\nProblema/Pergunta:`)
       addToast('success', 'Contexto copiado para Codex IA')
-    }, color: '#a78bfa' },
+    }, color: '#14b8a6' },
     { label: 'Ver dados', icon: Eye, onClick: () => setSelecionado(c) },
   ]
 
@@ -385,10 +385,6 @@ export function ClientesPage() {
           <h1 className="text-2xl font-bold text-white mb-2" style={{ fontFamily: 'var(--font-display)' }}>Clientes</h1>
           <p className="text-slate-500 text-sm">
             {metricas.total} clientes · {metricas.ativos} ativos · R$ {metricas.receita.toFixed(0)} ativos/mes
-          </p>
-          <p className="mt-2 inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-medium"
-             style={{ background: dataSource === 'supabase' ? 'rgba(34,197,94,0.12)' : 'rgba(245,158,11,0.12)', color: dataSource === 'supabase' ? '#4ade80' : '#fbbf24' }}>
-            Fonte: {dataSource === 'supabase' ? 'Supabase' : 'Mock'}
           </p>
         </div>
 
