@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Copy, CheckCircle, ArrowRight, ArrowLeft,
@@ -204,133 +204,39 @@ function pendingXcloudWorker(): TesteGerado['xcloudWorker'] {
 }
 
 // ----------------------------------------------------------------
-// Particles — melhoria #4
-// ----------------------------------------------------------------
-function Particles() {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-
-  useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-
-    const setSize = () => {
-      canvas.width = canvas.offsetWidth
-      canvas.height = canvas.offsetHeight
-    }
-    setSize()
-    window.addEventListener('resize', setSize)
-
-    type Particle = { x: number; y: number; vx: number; vy: number; size: number; alpha: number }
-    const particles: Particle[] = Array.from({ length: 55 }, () => ({
-      x: Math.random() * canvas.width,
-      y: Math.random() * canvas.height,
-      vx: (Math.random() - 0.5) * 0.18,
-      vy: (Math.random() - 0.5) * 0.18,
-      size: Math.random() * 1.2 + 0.2,
-      alpha: Math.random() * 0.25 + 0.04,
-    }))
-
-    let raf: number
-    const draw = () => {
-      ctx.clearRect(0, 0, canvas.width, canvas.height)
-      for (const p of particles) {
-        p.x += p.vx
-        p.y += p.vy
-        if (p.x < 0) p.x = canvas.width
-        if (p.x > canvas.width) p.x = 0
-        if (p.y < 0) p.y = canvas.height
-        if (p.y > canvas.height) p.y = 0
-
-        ctx.beginPath()
-        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2)
-        ctx.fillStyle = `rgba(99,155,255,${p.alpha})`
-        ctx.fill()
-      }
-      raf = requestAnimationFrame(draw)
-    }
-    draw()
-
-    return () => {
-      window.removeEventListener('resize', setSize)
-      cancelAnimationFrame(raf)
-    }
-  }, [])
-
-  return (
-    <canvas
-      ref={canvasRef}
-      className="pointer-events-none absolute inset-0 h-full w-full"
-      style={{ zIndex: 0 }}
-    />
-  )
-}
-
-// ----------------------------------------------------------------
 // Neon animated background (com partículas)
 // ----------------------------------------------------------------
 function NeonBackground() {
   return (
     <div className="pointer-events-none absolute inset-0 overflow-hidden" style={{ zIndex: 0 }}>
-      <Particles />
       <div
         className="absolute hidden rounded-full md:block"
         style={{
-          width: 700,
-          height: 700,
-          top: '-10%',
+          width: 620,
+          height: 620,
+          top: '-12%',
           left: '-15%',
-          background: 'radial-gradient(circle, rgba(37,99,235,0.14) 0%, rgba(37,99,235,0.04) 55%, transparent 70%)',
-          animation: 'orbFloat1 14s ease-in-out infinite',
-          filter: 'blur(1px)',
+          background: 'radial-gradient(circle, rgba(37,99,235,0.07) 0%, rgba(37,99,235,0.02) 55%, transparent 70%)',
         }}
       />
       <div
         className="absolute hidden rounded-full md:block"
         style={{
-          width: 550,
-          height: 550,
-          top: '10%',
+          width: 480,
+          height: 480,
+          top: '8%',
           right: '-12%',
-          background: 'radial-gradient(circle, rgba(59,130,246,0.11) 0%, rgba(59,130,246,0.03) 55%, transparent 70%)',
-          animation: 'orbFloat2 17s ease-in-out infinite',
-          filter: 'blur(1px)',
-        }}
-      />
-      <div
-        className="absolute hidden rounded-full md:block"
-        style={{
-          width: 800,
-          height: 350,
-          bottom: '0%',
-          left: '15%',
-          background: 'radial-gradient(ellipse, rgba(14,165,233,0.07) 0%, rgba(14,165,233,0.02) 55%, transparent 70%)',
-          animation: 'orbFloat3 20s ease-in-out infinite',
-          filter: 'blur(2px)',
-        }}
-      />
-      <div
-        className="absolute left-0 right-0 top-0 h-px"
-        style={{
-          background: 'linear-gradient(90deg, transparent 0%, rgba(37,99,235,0.5) 25%, rgba(59,130,246,0.7) 50%, rgba(37,99,235,0.5) 75%, transparent 100%)',
-          animation: 'linePulse 5s ease-in-out infinite',
+          background: 'radial-gradient(circle, rgba(20,184,166,0.06) 0%, rgba(20,184,166,0.02) 55%, transparent 70%)',
         }}
       />
       <div
         className="absolute inset-0"
         style={{
           backgroundImage: `
-            linear-gradient(rgba(59,130,246,0.02) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(59,130,246,0.02) 1px, transparent 1px)
+            linear-gradient(rgba(59,130,246,0.015) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(59,130,246,0.015) 1px, transparent 1px)
           `,
           backgroundSize: '80px 80px',
-        }}
-      />
-      <div
-        className="absolute inset-0"
-        style={{
-          background: 'radial-gradient(ellipse at center, transparent 40%, rgba(7,10,18,0.6) 100%)',
         }}
       />
     </div>
