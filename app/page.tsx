@@ -286,26 +286,26 @@ function MobileNav({ open, activePage, onClose, onNavigate, settings, busy, onTo
               </button>
             </div>
             <GameModeMobileRow settings={settings} busy={busy} onToggle={onToggleGameMode} />
-            <div className="grid grid-cols-2 gap-2">
+            <nav className="flex flex-col gap-1">
               {NAV_ITEMS.map(({ id, label, Icon }) => {
                 const active = activePage === id
                 return (
                   <button
                     key={id}
                     onClick={() => onNavigate(id)}
-                    className="flex min-h-12 items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-medium"
+                    className="flex h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-sm font-medium transition-colors"
                     style={{
-                      background: active ? 'rgba(59,130,246,0.16)' : 'rgba(255,255,255,0.035)',
-                      border: active ? '1px solid rgba(59,130,246,0.34)' : '1px solid rgba(255,255,255,0.06)',
+                      background: active ? 'rgba(59,130,246,0.16)' : 'transparent',
+                      border: active ? '1px solid rgba(59,130,246,0.34)' : '1px solid transparent',
                       color: active ? '#bfdbfe' : '#cbd5e1',
                     }}
                   >
-                    <Icon className="h-4 w-4 shrink-0" />
-                    <span>{label}</span>
+                    <Icon className="h-[18px] w-[18px] shrink-0" />
+                    <span className="truncate">{label}</span>
                   </button>
                 )
               })}
-            </div>
+            </nav>
           </motion.div>
         </motion.div>
       )}
