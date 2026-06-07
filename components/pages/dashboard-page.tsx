@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { m as motion } from 'framer-motion'
 import {
   TestTube2, Users, ClipboardList, Zap,
-  ArrowUpRight, Activity, Clock, TrendingUp, Eye
+  Activity, TrendingUp, Eye
 } from 'lucide-react'
 import type { NavPage } from '@/app/page'
 // MOCK: importação direta dos mocks — usada como fallback quando metrics não é passado
@@ -12,7 +12,6 @@ import type { NavPage } from '@/app/page'
 //   no Server Component pai (app/page.tsx) e os dados forem passados via props.
 import {
   MOCK_TESTES, MOCK_CLIENTES, MOCK_PIPELINE,
-  calcularMetricasPipeline,
 } from '@/lib/mock-data'
 import type { DashboardMetrics } from '@/lib/supabase/types'
 
@@ -47,10 +46,7 @@ export function DashboardPage({ onNavigate, metrics }: DashboardPageProps) {
 
   // ── Fallback para mock quando metrics não for fornecido (estado atual) ──
   // MOCK: bloco abaixo é temporário — remover quando metrics vier do Supabase
-  const pipe = calcularMetricasPipeline()
-
   const testesAtivos   = dashboardMetrics?.active_tests        ?? MOCK_TESTES.filter(t => t.status === 'ativo').length
-  const testesHoje     = dashboardMetrics?.total_tests         ?? MOCK_TESTES.length
   const operacaoHoje   = dashboardMetrics?.leads_in_progress   ?? MOCK_PIPELINE.filter(l => l.etapa !== 'ativado' && l.etapa !== 'renovacao').length
   const clientesAtivos = dashboardMetrics?.active_clients      ?? MOCK_CLIENTES.filter(c => c.status === 'ativo').length
 
@@ -63,17 +59,6 @@ export function DashboardPage({ onNavigate, metrics }: DashboardPageProps) {
   const ativadosHoje = dashboardMetrics?.activated_today
     ?? MOCK_CLIENTES.filter(c => c.criadoEm === hojeBR).length
 
-  // MOCK: funil vem do pipe mock ou de metrics.funnel
-  const funil = dashboardMetrics?.funnel
-    ? dashboardMetrics.funnel.map(f => ({ label: f.label, value: f.count, color: f.color }))
-    : [
-        { label: 'Leads',     value: pipe.novo_lead + pipe.contato,    color: '#3b82f6' },
-        { label: 'Testando',  value: pipe.teste_gerado + pipe.testando, color: '#f59e0b' },
-        { label: 'Interesse', value: pipe.interessado,                  color: '#60a5fa' },
-        { label: 'Pagaram',   value: pipe.pagou,                        color: '#22c55e' },
-        { label: 'Ativados',  value: pipe.ativado,                      color: '#14b8a6' },
-      ]
-
   const kpis = [
     { label: 'Testes ativos hoje', value: testesAtivos,   icon: TestTube2,     color: '#3b82f6', page: 'testes'   as NavPage },
     { label: 'Operação hoje',      value: operacaoHoje,   icon: ClipboardList, color: '#f59e0b', page: 'pipeline' as NavPage },
@@ -82,25 +67,25 @@ export function DashboardPage({ onNavigate, metrics }: DashboardPageProps) {
   ]
 
   return (
-    <div className="relative min-h-screen overflow-hidden">
+    <div className="relative min-h-[calc(100vh-4rem)] md:min-h-[calc(100vh-3.5rem)] overflow-hidden">
       <BgGlow />
-      <div className="relative px-6 py-10 max-w-5xl mx-auto w-full" style={{ zIndex: 1 }}>
+      <div className="relative px-4 py-6 sm:px-6 sm:py-10 max-w-5xl mx-auto w-full" style={{ zIndex: 1 }}>
         <motion.div
           initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
-          className="mb-8"
+          className="mb-5 sm:mb-8"
         >
-          <div className="flex items-center gap-2 mb-2">
+          <div className="flex items-center gap-2 mb-1.5 sm:mb-2">
             <Activity className="h-4 w-4" style={{ color: '#3b82f6' }} />
             <span className="text-xs text-slate-500 uppercase tracking-widest font-medium">Central de comando</span>
           </div>
-          <h1 className="text-3xl font-bold text-white" style={{ fontFamily: 'var(--font-display)' }}>
+          <h1 className="text-2xl sm:text-3xl font-bold text-white" style={{ fontFamily: 'var(--font-display)' }}>
             Central Play Plus
           </h1>
           <p className="text-slate-500 text-sm mt-1">Visão geral da operação · {new Date().toLocaleDateString('pt-BR')}</p>
         </motion.div>
 
         {/* KPIs grandes */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-3 sm:mb-4">
           {kpis.map((k, i) => (
             <motion.button
               key={k.label}
@@ -108,16 +93,16 @@ export function DashboardPage({ onNavigate, metrics }: DashboardPageProps) {
               initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
               transition={{ delay: i * 0.05 }}
               whileHover={{ y: -2 }}
-              className="text-left rounded-2xl p-5 group relative overflow-hidden"
+              className="text-left rounded-2xl p-4 sm:p-5 group relative overflow-hidden"
               style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
             >
               <div
-                className="flex h-10 w-10 items-center justify-center rounded-xl mb-4"
+                className="flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center rounded-xl mb-3 sm:mb-4"
                 style={{ background: `${k.color}1f`, border: `1px solid ${k.color}40` }}
               >
-                <k.icon className="h-5 w-5" style={{ color: k.color }} />
+                <k.icon className="h-4 w-4 sm:h-5 sm:w-5" style={{ color: k.color }} />
               </div>
-              <p className="text-3xl font-bold text-white leading-none mb-1.5" style={{ fontFamily: 'var(--font-display)' }}>
+              <p className="text-2xl sm:text-3xl font-bold text-white leading-none mb-1 sm:mb-1.5" style={{ fontFamily: 'var(--font-display)' }}>
                 {k.value}
               </p>
               <p className="text-xs text-slate-500">{k.label}</p>
@@ -127,43 +112,6 @@ export function DashboardPage({ onNavigate, metrics }: DashboardPageProps) {
 
         {/* Projeção de renovação */}
         <RenovacaoProjecao base={renovacaoBase} onNavigate={onNavigate} />
-
-        {/* Funil */}
-        <motion.div
-          initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}
-          className="rounded-2xl p-6"
-          style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
-        >
-          <div className="flex items-center justify-between mb-5">
-            <div className="flex items-center gap-2">
-              <Clock className="h-4 w-4" style={{ color: '#3b82f6' }} />
-              <h2 className="text-sm font-semibold text-white">Hoje na operação</h2>
-            </div>
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => onNavigate('pipeline')}
-                className="text-xs text-slate-500 hover:text-white transition-colors flex items-center gap-1"
-              >
-                Ver pipeline <ArrowUpRight className="h-3 w-3" />
-              </button>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-            {funil.map(f => (
-              <div
-                key={f.label}
-                className="rounded-xl p-4 relative overflow-hidden"
-                style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border)' }}
-              >
-                <div className="h-1 w-8 rounded-full mb-3" style={{ background: f.color }} />
-                <p className="text-2xl font-bold text-white leading-none mb-1" style={{ fontFamily: 'var(--font-display)' }}>
-                  {f.value}
-                </p>
-                <p className="text-[11px] text-slate-500">{f.label}</p>
-              </div>
-            ))}
-          </div>
-        </motion.div>
       </div>
     </div>
   )
@@ -190,10 +138,10 @@ function RenovacaoProjecao({ base, onNavigate }: { base: number; onNavigate: (p:
   return (
     <motion.div
       initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
-      className="rounded-2xl p-6 relative overflow-hidden mb-4"
+      className="rounded-2xl p-4 sm:p-6 relative overflow-hidden mb-4"
       style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
     >
-      <div className="relative flex items-start justify-between mb-5">
+      <div className="relative flex items-start justify-between mb-4 sm:mb-5">
         <div>
           <div className="flex items-center gap-2 mb-1">
             <TrendingUp className="h-4 w-4" style={{ color: '#22c55e' }} />
@@ -217,7 +165,7 @@ function RenovacaoProjecao({ base, onNavigate }: { base: number; onNavigate: (p:
         {periodos.map((p, i) => {
           const valor = valorDe(p.meses)
           const revelado = ativo === i
-          const altura = 28 + (valor / maxValor) * 88 // 28px base + até ~116px
+          const altura = 24 + (valor / maxValor) * 64 // 24px base + até ~88px
           return (
             <button
               key={p.label}
