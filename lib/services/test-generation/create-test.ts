@@ -3,6 +3,7 @@ import { isoPlusMinutes } from '@/lib/services/operational-window'
 import { readOperationalSettings } from '@/lib/services/operational-settings'
 import { getSupabaseServerClient } from '@/lib/supabase/server'
 import { runXcloudWorker } from '@/lib/services/xcloud-worker'
+import { normalizeXcloudDeviceKey, xcloudDeviceKeyDiagnostics, xcloudDeviceKeyValidationError } from '@/lib/services/xcloud-device-key'
 
 import { generateTest } from './generate-test'
 import { createYellowBoxTest } from './providers/yellow-box'
@@ -31,6 +32,23 @@ export type CreateTestInput = {
 type AppRow = { id: string; key: string; name: string; status: string | null }
 type PanelRow = { id: string; key: string; name: string; supported_app_keys: string[] | null; status: string | null }
 type ExistingClientRow = { id: string; status: string | null; legacy_metadata?: JsonRecord | null }
+type SavedTestRow = { id: string; status: string; expires_at: string | null }
+type ExistingFailedXcloudTestRow = {
+  id: string
+  client_id: string
+  app_id: string
+  panel_id: string
+  account_id: string | null
+  device_key: string | null
+  provider: string | null
+  provider_code: string | null
+  status: string
+  requested_at: string | null
+  activated_at: string | null
+  expires_at: string | null
+  failed_at: string | null
+  legacy_metadata: JsonRecord | null
+}
 
 class TestCreateError extends Error {
   status: number
@@ -113,6 +131,16 @@ function publicCode(appKey: string, providerCode?: string): string | undefined {
 
 function providerName(panelKey: string): string {
   return panelKey === 'brasil_yellow' ? 'yellow_box' : panelKey
+}
+
+function metadataString(metadata: JsonRecord, key: string): string {
+  const value = metadata[key]
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function metadataObject(metadata: JsonRecord, key: string): JsonRecord {
+  const value = metadata[key]
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as JsonRecord : {}
 }
 
 function safeMetadata(metadata: JsonRecord): JsonRecord {
@@ -412,11 +440,19 @@ async function markXcloudGenerationFailed(input: {
   testId: string
   clientId: string
   worker: JsonRecord
-}) {
+}): Promise<JsonRecord> {
   const database = db()
   const now = new Date().toISOString()
+  const dispatch: JsonRecord = {
+    status: 'skipped',
+    ok: false,
+    dry_run: false,
+    code: 'XCLOUD_WORKER_FAILED',
+    message: 'Mensagem nao enviada porque o XCloud nao confirmou ativacao da device.',
+    updated_at: now,
+  }
   const current = await getCurrentTestState(input.testId)
-  if (current.status !== 'active' || current.legacy_metadata.superseded_by_test_id) return
+  if (current.status !== 'active' || current.legacy_metadata.superseded_by_test_id) return dispatch
 
   const { error: updateTestError } = await database
     .from('tests')
@@ -431,13 +467,7 @@ async function markXcloudGenerationFailed(input: {
           status: 'failed',
           updated_at: now,
         },
-        dispatch: {
-          status: 'skipped',
-          ok: false,
-          code: 'XCLOUD_WORKER_FAILED',
-          message: 'Mensagem nao enviada porque o XCloud nao confirmou ativacao da device.',
-          updated_at: now,
-        },
+        dispatch,
       },
     })
     .eq('id', input.testId)
@@ -471,6 +501,8 @@ async function markXcloudGenerationFailed(input: {
       .eq('status', 'test_active')
       .then(() => null)
   }
+
+  return dispatch
 }
 
 async function resolveApp(appId: string | undefined, appKeyInput: string | undefined): Promise<AppRow> {
@@ -567,13 +599,120 @@ function publicTestMessage(input: {
   ].filter(Boolean).join('\n')
 }
 
+function createTestResponse(input: {
+  success: boolean
+  code?: string
+  error?: string
+  source: 'supabase' | 'mock'
+  mode: 'mock' | 'real'
+  client: { id: string; name: string; phone: string; status: string }
+  app: AppRow
+  panel: Pick<PanelRow, 'id' | 'key' | 'name'>
+  test: SavedTestRow & { client_id?: string | null; device_key?: string | null }
+  providerResult: ProviderTestResult
+  providerCode?: string | null
+  expiresAt: string
+  durationMinutes: number
+  gameModeEnabled: boolean
+  deviceKey?: string | null
+  xcloudWorker?: JsonRecord | null
+  dispatch?: JsonRecord | null
+}) {
+  return {
+    success: input.success,
+    code: input.code,
+    error: input.error ? maskSensitiveText(input.error) : undefined,
+    source: input.source,
+    mode: input.mode,
+    client: { id: input.client.id, name: input.client.name, phone: input.client.phone, status: input.client.status },
+    app: { id: input.app.id, key: input.app.key, name: input.app.name },
+    panel: { id: input.panel.id, key: input.panel.key, name: input.panel.name },
+    test: {
+      id: input.test.id,
+      test_id: input.test.id,
+      client_id: input.test.client_id || input.client.id,
+      app_key: input.app.key,
+      panel_key: input.panel.key,
+      status: input.test.status,
+      order_id: input.providerResult.order_id || null,
+      pedido: input.providerResult.order_id || null,
+      host: input.providerResult.host || null,
+      username: input.providerResult.username,
+      password: input.providerResult.password,
+      code: input.providerCode || null,
+      provider_code: input.providerCode || null,
+      dns: input.providerResult.dns || null,
+      expires_at: input.expiresAt,
+      validade: input.expiresAt,
+      duration_minutes: input.durationMinutes,
+      game_mode_enabled: input.gameModeEnabled,
+      device_key: input.app.key === 'xcloud' && input.deviceKey ? maskDeviceKey(input.deviceKey) : null,
+      xcloud_worker_status: input.app.key === 'xcloud' ? String(input.xcloudWorker?.status || (xcloudWorkerEnabled() ? 'running' : 'not_started')) : null,
+      xcloud_worker: input.xcloudWorker || null,
+      dispatch: input.dispatch || null,
+      mensagem: publicTestMessage({
+        clientName: input.client.name,
+        appName: input.app.name,
+        host: input.providerResult.host,
+        username: input.providerResult.username,
+        password: input.providerResult.password,
+        providerCode: input.providerCode || undefined,
+        expiresAt: input.expiresAt,
+      }),
+    },
+    account: null,
+    slot: null,
+  }
+}
+
+function providerResultFromTestMetadata(metadata: JsonRecord, providerCode?: string | null): ProviderTestResult {
+  const technical = metadataObject(metadata, 'technical_connection')
+  return {
+    order_id: metadataString(metadata, 'order_id') || undefined,
+    host: metadataString(metadata, 'host') || metadataString(metadata, 'dns') || undefined,
+    username: metadataString(metadata, 'username'),
+    password: metadataString(metadata, 'password'),
+    provider_code: providerCode || metadataString(metadata, 'provider_code') || undefined,
+    dns: metadataString(metadata, 'dns') || metadataString(metadata, 'host') || undefined,
+    expires_at: metadataString(metadata, 'expires_at') || new Date().toISOString(),
+    optional_m3u_url: metadataString(technical, 'optional_m3u_url') || undefined,
+    optional_hls_url: metadataString(technical, 'optional_hls_url') || undefined,
+    raw_provider_response: metadataObject(technical, 'raw_provider_response'),
+  }
+}
+
+async function findReusableFailedXcloudTest(input: {
+  clientId: string
+  appId: string
+  panelId: string
+  deviceKey: string
+}): Promise<ExistingFailedXcloudTestRow | null> {
+  const database = db()
+  const { data, error } = await database
+    .from('tests')
+    .select('id,client_id,app_id,panel_id,account_id,device_key,provider,provider_code,status,requested_at,activated_at,expires_at,failed_at,legacy_metadata')
+    .eq('client_id', input.clientId)
+    .eq('app_id', input.appId)
+    .eq('panel_id', input.panelId)
+    .eq('device_key', input.deviceKey)
+    .eq('status', 'failed')
+    .gt('expires_at', new Date().toISOString())
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (error) throw new TestCreateError(500, 'FAILED_XCLOUD_TEST_LOOKUP_FAILED', error.message)
+  return data as ExistingFailedXcloudTestRow | null
+}
+
 export async function createGeneratedTest(input: CreateTestInput) {
   const startedAt = new Date().toISOString()
   const testMode = mode()
   const clientName = String(input.client_name || input.clientName || input.nome || '').trim()
   const phoneRaw = String(input.phone || input.telefone || '').trim()
   const phoneE164 = normalizePhone(phoneRaw)
-  const deviceKey = String(input.device_key || input.deviceKey || '').trim()
+  const rawDeviceKey = input.device_key || input.deviceKey || ''
+  const deviceKey = normalizeXcloudDeviceKey(rawDeviceKey)
+  const deviceKeyFormat = xcloudDeviceKeyDiagnostics(rawDeviceKey, deviceKey)
   const operatorRef = String(input.operator_ref || '').trim() || null
 
   try {
@@ -592,8 +731,11 @@ export async function createGeneratedTest(input: CreateTestInput) {
     if (!panel.supported_app_keys?.includes(app.key)) {
       throw new TestCreateError(400, 'APP_PANEL_INCOMPATIBLE', 'App e painel nao sao compativeis.')
     }
-    if (app.key === 'xcloud' && !deviceKey) {
-      throw new TestCreateError(400, 'DEVICE_KEY_REQUIRED', 'device_key e obrigatoria para XCloud.')
+    if (app.key === 'xcloud') {
+      const deviceKeyError = xcloudDeviceKeyValidationError(deviceKey)
+      if (deviceKeyError) {
+        throw new TestCreateError(400, deviceKey ? 'DEVICE_KEY_INVALID' : 'DEVICE_KEY_REQUIRED', deviceKeyError)
+      }
     }
 
     const database = db()
@@ -604,6 +746,65 @@ export async function createGeneratedTest(input: CreateTestInput) {
         appId: app.id,
         operatorRef,
       })
+
+      const reusableFailedTest = await findReusableFailedXcloudTest({
+        clientId: existingClient.id,
+        appId: app.id,
+        panelId: panel.id,
+        deviceKey,
+      })
+      if (reusableFailedTest) {
+        const metadata = reusableFailedTest.legacy_metadata || {}
+        const existingProviderResult = providerResultFromTestMetadata(metadata, reusableFailedTest.provider_code)
+        if (existingProviderResult.username && existingProviderResult.password) {
+          const operationalSettings = await readOperationalSettings()
+          const existingWorker = metadataObject(metadata, 'xcloud_worker')
+          const existingDispatch = metadataObject(metadata, 'dispatch')
+          await writeLog('XCLOUD_FAILED_TEST_REUSED_FOR_RETRY', 'warning', {
+            client_id: existingClient.id,
+            test_id: reusableFailedTest.id,
+            message: 'Teste XCloud falhado reutilizado para retry sem gerar outro Yellow.',
+            metadata: {
+              operator_ref: operatorRef,
+              device_key: maskDeviceKey(deviceKey),
+              device_key_format: deviceKeyFormat,
+              worker_status: existingWorker.status || null,
+              worker_stage: existingWorker.stage || null,
+            },
+          })
+          return createTestResponse({
+            success: false,
+            code: 'XCLOUD_RETRY_AVAILABLE',
+            error: 'XCloud falhou nesta tentativa. Use Tentar XCloud novamente para reutilizar as credenciais ja geradas.',
+            source: testMode === 'real' ? 'supabase' : 'mock',
+            mode: testMode,
+            client: { id: existingClient.id, name: clientName, phone: phoneRaw, status: existingClient.status || 'lead' },
+            app,
+            panel,
+            test: {
+              id: reusableFailedTest.id,
+              client_id: reusableFailedTest.client_id,
+              status: reusableFailedTest.status,
+              expires_at: reusableFailedTest.expires_at,
+              device_key: reusableFailedTest.device_key,
+            },
+            providerResult: existingProviderResult,
+            providerCode: reusableFailedTest.provider_code || existingProviderResult.provider_code || null,
+            expiresAt: reusableFailedTest.expires_at || metadataString(metadata, 'expires_at') || new Date().toISOString(),
+            durationMinutes: Number(metadata.duration_minutes || operationalSettings.test_duration_minutes),
+            gameModeEnabled: Boolean(metadata.game_mode_enabled ?? operationalSettings.game_mode_enabled),
+            deviceKey,
+            xcloudWorker: existingWorker,
+            dispatch: Object.keys(existingDispatch).length ? existingDispatch : {
+              status: 'skipped',
+              ok: false,
+              dry_run: false,
+              code: 'XCLOUD_WORKER_FAILED',
+              message: 'Mensagem nao enviada porque o XCloud nao confirmou ativacao da device.',
+            },
+          })
+        }
+      }
     }
 
     await writeLog('TEST_PROVIDER_SELECTED', 'info', {
@@ -612,7 +813,13 @@ export async function createGeneratedTest(input: CreateTestInput) {
     })
     await writeLog('YELLOW_BOX_TEST_START', 'info', {
       message: `Iniciando teste Yellow Box para app=${app.key}.`,
-      metadata: { app_key: app.key, phone: maskPhone(phoneRaw), device_key: deviceKey ? maskDeviceKey(deviceKey) : null, operator_ref: operatorRef },
+      metadata: {
+        app_key: app.key,
+        phone: maskPhone(phoneRaw),
+        device_key: deviceKey ? maskDeviceKey(deviceKey) : null,
+        device_key_format: app.key === 'xcloud' ? deviceKeyFormat : null,
+        operator_ref: operatorRef,
+      },
     })
 
     const providerResult = await callProvider({ client_name: clientName, phone: phoneE164, app, panel, device_key: deviceKey || undefined })
@@ -697,7 +904,7 @@ export async function createGeneratedTest(input: CreateTestInput) {
       },
     }).select('id,status,expires_at').single()
     if (testResult.error) throw new TestCreateError(500, 'TEST_SAVE_FAILED', testResult.error.message)
-    const test = testResult.data as { id: string; status: string; expires_at: string | null }
+    const test = testResult.data as SavedTestRow
 
     await createPipelineEvent({
       entity_type: 'test',
@@ -757,7 +964,7 @@ export async function createGeneratedTest(input: CreateTestInput) {
         xcloudWorker = await runXcloudWorker({ test_id: test.id, operator_ref: operatorRef || 'painel_web_wizard' })
         await assertTestStillCurrent(test.id)
         if (xcloudWorker.status === 'failed') {
-          await markXcloudGenerationFailed({
+          const dispatch = await markXcloudGenerationFailed({
             testId: test.id,
             clientId: client.id,
             worker: xcloudWorker as unknown as JsonRecord,
@@ -768,16 +975,72 @@ export async function createGeneratedTest(input: CreateTestInput) {
             message: xcloudWorker.message || 'Worker XCloud retornou falha.',
             metadata: { app_key: app.key, device_key: maskDeviceKey(deviceKey), operator_ref: operatorRef, xcloud_worker: xcloudWorker as unknown as JsonRecord },
           })
-          throw new TestCreateError(502, 'XCLOUD_WORKER_FAILED', `XCloud nao confirmou a ativacao da device: ${xcloudWorker.message || xcloudWorker.stage}`)
+          return createTestResponse({
+            success: false,
+            code: 'XCLOUD_WORKER_FAILED',
+            error: `XCloud nao confirmou a ativacao da device: ${xcloudWorker.message || xcloudWorker.stage}`,
+            source: testMode === 'real' ? 'supabase' : 'mock',
+            mode: testMode,
+            client: { id: client.id, name: client.name, phone: phoneRaw, status: 'lead' },
+            app,
+            panel,
+            test: { ...test, status: 'failed', client_id: client.id, device_key: deviceKey },
+            providerResult,
+            providerCode,
+            expiresAt,
+            durationMinutes,
+            gameModeEnabled: operationalSettings.game_mode_enabled,
+            deviceKey,
+            xcloudWorker: xcloudWorker as unknown as JsonRecord,
+            dispatch,
+          })
         }
       } catch (workerError) {
+        const workerFailure: JsonRecord = {
+          status: 'failed',
+          stage: typeof (workerError as { stage?: unknown }).stage === 'string' ? (workerError as { stage: string }).stage : 'AddXcloudDevice',
+          device_added: false,
+          xtream_attached: false,
+          confirmation_found: false,
+          screenshot_path: typeof (workerError as { screenshotPath?: unknown }).screenshotPath === 'string' ? (workerError as { screenshotPath: string }).screenshotPath : null,
+          message: workerError instanceof Error ? workerError.message : String(workerError),
+        }
+        const dispatch = await markXcloudGenerationFailed({
+          testId: test.id,
+          clientId: client.id,
+          worker: workerFailure,
+        }).catch(() => ({
+          status: 'skipped',
+          ok: false,
+          dry_run: false,
+          code: 'XCLOUD_WORKER_FAILED',
+          message: 'Mensagem nao enviada porque o XCloud nao confirmou ativacao da device.',
+        } as JsonRecord))
         await writeLog('XCLOUD_WORKER_AUTORUN_FAILED', 'error', {
           client_id: client.id,
           test_id: test.id,
           message: workerError instanceof Error ? workerError.message : String(workerError),
           metadata: { app_key: app.key, device_key: maskDeviceKey(deviceKey), operator_ref: operatorRef },
         })
-        throw workerError
+        return createTestResponse({
+          success: false,
+          code: 'XCLOUD_WORKER_FAILED',
+          error: `XCloud nao confirmou a ativacao da device: ${workerFailure.message || workerFailure.stage}`,
+          source: testMode === 'real' ? 'supabase' : 'mock',
+          mode: testMode,
+          client: { id: client.id, name: client.name, phone: phoneRaw, status: 'lead' },
+          app,
+          panel,
+          test: { ...test, status: 'failed', client_id: client.id, device_key: deviceKey },
+          providerResult,
+          providerCode,
+          expiresAt,
+          durationMinutes,
+          gameModeEnabled: operationalSettings.game_mode_enabled,
+          deviceKey,
+          xcloudWorker: workerFailure,
+          dispatch,
+        })
       }
     }
     if (app.key === 'xcloud') {
@@ -892,7 +1155,7 @@ export async function createGeneratedTest(input: CreateTestInput) {
     try {
       await writeLog(err.code === 'TEST_CREATE_FAILED' ? 'TEST_CREATE_FAILED' : 'YELLOW_BOX_TEST_FAILED', 'error', {
         message: err.message,
-        metadata: { code: err.code, phone: phoneRaw ? maskPhone(phoneRaw) : null, device_key: deviceKey ? maskDeviceKey(deviceKey) : null },
+        metadata: { code: err.code, phone: phoneRaw ? maskPhone(phoneRaw) : null, device_key: deviceKey ? maskDeviceKey(deviceKey) : null, device_key_format: deviceKey ? deviceKeyFormat : null },
       })
       if (err.code !== 'TEST_CREATE_FAILED') {
         await writeLog('TEST_CREATE_FAILED', 'error', { message: err.message, metadata: { code: err.code } })

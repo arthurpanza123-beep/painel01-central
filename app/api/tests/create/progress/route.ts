@@ -15,17 +15,24 @@ type LogRow = {
 
 const STEP_DEFS = [
   { id: 'validando', label: 'Validando cliente', start: ['TEST_CREATE_STARTED'], done: ['TEST_PROVIDER_SELECTED'] },
-  { id: 'acesso', label: 'Gerando acesso', start: ['YELLOW_BOX_TEST_START'], done: ['YELLOW_BOX_TEST_OK', 'TEST_CREATED'] },
-  { id: 'playlist', label: 'Obtendo playlist', start: ['YELLOW_BOX_TEST_OK'], done: ['TEST_CREATED', 'XCLOUD_WORKER_STARTED'] },
+  { id: 'acesso', label: 'Gerando acesso Yellow', start: ['YELLOW_BOX_TEST_START'], done: ['YELLOW_BOX_TEST_OK', 'TEST_CREATED'] },
   { id: 'dispositivo', label: 'Criando device XCloud', start: ['XCLOUD_WORKER_STARTED', 'XCLOUD_DEVICE_LIST_REFRESHED'], done: ['XCLOUD_DEVICE_ADDED', 'XCLOUD_DEVICE_ROW_FOUND', 'XCLOUD_DEVICE_READY_FOR_XTREAM'] },
   { id: 'servidor', label: 'Vinculando servidor Xtream', start: ['XCLOUD_XTREAM_ATTACH_STARTED'], done: ['XCLOUD_XTREAM_ATTACHED'] },
   { id: 'reload', label: 'Confirmando RELOAD', start: ['XCLOUD_XTREAM_ATTACHED'], done: ['XCLOUD_WORKER_COMPLETED', 'XCLOUD_RECREATE_CONFIRMED'] },
-  { id: 'mensagem', label: 'Enviando mensagem', start: ['XCLOUD_WORKER_COMPLETED', 'XCLOUD_RECREATE_CONFIRMED', 'TEST_CREATED', 'TEST_MESSAGE_DISPATCH_STARTED'], done: ['TEST_MESSAGE_SENT', 'TEST_MESSAGE_DISPATCH_FAILED', 'TEST_MESSAGE_PREPARED'] },
+  { id: 'mensagem', label: 'Preparando mensagem', start: ['XCLOUD_WORKER_COMPLETED', 'XCLOUD_RECREATE_CONFIRMED', 'TEST_MESSAGE_DISPATCH_STARTED'], done: ['TEST_MESSAGE_SENT', 'TEST_MESSAGE_DISPATCH_FAILED', 'TEST_MESSAGE_PREPARED'] },
   { id: 'concluido', label: 'Concluído', start: ['TEST_MESSAGE_PREPARED'], done: ['TEST_MESSAGE_PREPARED'] },
 ]
 
 function eventSet(logs: LogRow[]) {
   return new Set(logs.map((log) => log.event))
+}
+
+function isFailureEvent(log: LogRow): boolean {
+  return log.level === 'error' || (log.level !== 'warning' && /FAILED|ERROR/i.test(log.event))
+}
+
+function isRecoveryEvent(log: LogRow): boolean {
+  return ['XCLOUD_WORKER_COMPLETED', 'XCLOUD_RECREATE_CONFIRMED', 'TEST_MESSAGE_PREPARED'].includes(log.event)
 }
 
 function stepStatus(def: (typeof STEP_DEFS)[number], events: Set<string>, failedEvent?: LogRow | null) {
@@ -71,7 +78,11 @@ export async function GET(req: NextRequest) {
   }
 
   const events = eventSet(logs)
-  const failedEvent = logs.find((log) => log.level === 'error' || (log.level !== 'warning' && /FAILED|ERROR/i.test(log.event))) || null
+  const latestFailure = logs.filter(isFailureEvent).at(-1) || null
+  const latestRecovery = logs.filter(isRecoveryEvent).at(-1) || null
+  const failedEvent = latestFailure && (!latestRecovery || String(latestFailure.created_at || '') > String(latestRecovery.created_at || ''))
+    ? latestFailure
+    : null
   const steps = STEP_DEFS.map((def) => ({
     id: def.id,
     label: def.label,
@@ -83,7 +94,7 @@ export async function GET(req: NextRequest) {
     ok: true,
     operator_ref: operatorRef,
     test_id: testId,
-    status: failedEvent ? 'failed' : events.has('TEST_MESSAGE_PREPARED') ? 'success' : 'running',
+    status: failedEvent ? 'failed' : events.has('TEST_MESSAGE_PREPARED') || events.has('XCLOUD_WORKER_COMPLETED') || events.has('XCLOUD_RECREATE_CONFIRMED') ? 'success' : 'running',
     current_step: current,
     failed_event: failedEvent ? { event: failedEvent.event, message: failedEvent.message } : null,
     steps,

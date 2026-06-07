@@ -48,6 +48,29 @@ async function fillFirst(page: Page | Locator, selectors: string[], value: strin
   return true
 }
 
+async function findSearchField(page: Page): Promise<Locator | null> {
+  const roleSearch = page.getByRole('textbox', { name: /search|buscar|pesquisar/i }).first()
+  if (await roleSearch.isVisible({ timeout: 1200 }).catch(() => false)) return roleSearch
+
+  return firstVisible(page, [
+    'input[type="search"]',
+    'input[placeholder*="search" i]',
+    'input[placeholder*="buscar" i]',
+    'input[placeholder*="pesquisar" i]',
+    'input[name*="search" i]',
+  ], 900)
+}
+
+async function applyDeviceSearch(page: Page, deviceKey: string): Promise<boolean> {
+  const field = await findSearchField(page)
+  if (!field) return false
+  await field.fill(deviceKey)
+  await page.keyboard.press('Enter').catch(() => null)
+  await page.waitForLoadState('networkidle', { timeout: 3000 }).catch(() => null)
+  await page.waitForTimeout(900)
+  return true
+}
+
 async function selectOptionByText(page: Page | Locator, labels: RegExp[]): Promise<boolean> {
   const selects = await page.locator('select').all()
   for (const select of selects) {
@@ -163,6 +186,13 @@ async function findDeviceRow(page: Page, deviceKey: string): Promise<DeviceRowSn
   return snapshotDeviceRow(row)
 }
 
+async function findDeviceRowAcrossList(page: Page, deviceKey: string): Promise<DeviceRowSnapshot | null> {
+  const visibleRow = await findDeviceRow(page, deviceKey)
+  if (visibleRow) return visibleRow
+  if (!await applyDeviceSearch(page, deviceKey)) return null
+  return findDeviceRow(page, deviceKey)
+}
+
 function textAfterDeviceKey(snapshot: DeviceRowSnapshot, deviceKey: string): string {
   const index = snapshot.cells.findIndex((cell) => cell.includes(deviceKey))
   if (index >= 0) return snapshot.cells.slice(index + 1).join(' ')
@@ -220,6 +250,13 @@ async function refreshDeviceList(page: Page, config: XcloudWorkerConfig): Promis
   await page.waitForTimeout(800)
 }
 
+function existingDeviceNotSafeReason(readiness: XcloudDeviceReadiness): string | null {
+  if (!readiness.status_active) return 'device ja existe, mas nao esta Active.'
+  if (!readiness.own_playlist_confirmed) return 'device ja existe, mas Uses its own playlist nao esta confirmado.'
+  if (!readiness.app_name_confirmed) return 'device ja existe, mas o app listado nao parece XCloudTV/XCloudPro.'
+  return null
+}
+
 export async function waitForDeviceReadyAfterAdd(page: Page, config: XcloudWorkerConfig, deviceKey: string): Promise<XcloudDeviceReadiness> {
   const startedAt = Date.now()
   const timeoutMs = config.pageTimeoutMs
@@ -227,7 +264,7 @@ export async function waitForDeviceReadyAfterAdd(page: Page, config: XcloudWorke
 
   while (Date.now() - startedAt < timeoutMs) {
     await refreshDeviceList(page, config)
-    const snapshot = await findDeviceRow(page, deviceKey)
+    const snapshot = await findDeviceRowAcrossList(page, deviceKey)
     if (!snapshot) {
       await page.waitForTimeout(1500)
       continue
@@ -256,8 +293,14 @@ export async function addXcloudDevice(page: Page, config: XcloudWorkerConfig, de
   await loginIfNeeded(page, config)
   await openDevices(page, config)
 
-  if (await deviceExists(page, deviceKey)) {
-    return { device_added: false, already_exists: true, ready_for_xtream: true }
+  const existingSnapshot = await findDeviceRowAcrossList(page, deviceKey)
+  if (existingSnapshot) {
+    const readiness = validateDeviceReadiness(existingSnapshot, deviceKey)
+    const unsafeReason = existingDeviceNotSafeReason(readiness)
+    if (unsafeReason) {
+      throw new Error(`XCLOUD_DEVICE_ALREADY_EXISTS_NOT_READY: ${unsafeReason} Use a acao controlada de recriar device se necessario.`)
+    }
+    return { device_added: false, already_exists: true, ready_for_xtream: true, readiness }
   }
 
   const opened = await clickByText(page, [/add\s*new\s*device/i, /new\s*device/i, /adicionar/i, /novo\s*dispositivo/i])

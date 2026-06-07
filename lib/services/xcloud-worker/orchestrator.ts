@@ -2,6 +2,7 @@ import path from 'node:path'
 
 import { maskDeviceKey, maskPassword, maskSensitiveText, maskUrl, maskUsername } from '@/lib/services/masking'
 import { getSupabaseServerClient } from '@/lib/supabase/server'
+import { normalizeXcloudDeviceKey, xcloudDeviceKeyDiagnostics, xcloudDeviceKeyValidationError } from '@/lib/services/xcloud-device-key'
 
 import { getXcloudPage, runXcloudExclusive } from './browser'
 import { saveXcloudScreenshot } from './screenshots'
@@ -206,9 +207,11 @@ async function resolveFromTestId(testId: string, requiresXtream: boolean): Promi
   const host = metadataValue(metadata, 'host') || metadataValue(metadata, 'dns')
   const username = metadataValue(metadata, 'username')
   const password = metadataValue(metadata, 'password')
-  const deviceKey = String(test.device_key || metadataValue(metadata, 'device_key') || '').trim()
+  const rawDeviceKey = test.device_key || metadataValue(metadata, 'device_key') || ''
+  const deviceKey = normalizeXcloudDeviceKey(rawDeviceKey)
 
-  if (!deviceKey) throw new XcloudWorkerError(400, 'DEVICE_KEY_REQUIRED', 'device_key e obrigatoria para XCloud.', 'GenerateAccess')
+  const deviceKeyError = xcloudDeviceKeyValidationError(deviceKey)
+  if (deviceKeyError) throw new XcloudWorkerError(400, deviceKey ? 'DEVICE_KEY_INVALID' : 'DEVICE_KEY_REQUIRED', deviceKeyError, 'GenerateAccess')
   if (requiresXtream && (!host || !username || !password)) throw new XcloudWorkerError(400, 'XTREAM_REQUIRED', 'Teste nao tem host/username/password para vincular no XCloud.', 'GenerateAccess')
 
   return {
@@ -224,11 +227,12 @@ async function resolveFromTestId(testId: string, requiresXtream: boolean): Promi
 }
 
 async function resolveDirect(input: XcloudWorkerInput, requiresXtream: boolean): Promise<XcloudResolvedTest> {
-  const deviceKey = String(input.device_key || '').trim()
+  const deviceKey = normalizeXcloudDeviceKey(input.device_key || '')
   const host = String(input.host || '').trim()
   const username = String(input.username || '').trim()
   const password = String(input.password || '').trim()
-  if (!deviceKey) throw new XcloudWorkerError(400, 'DEVICE_KEY_REQUIRED', 'device_key e obrigatoria para XCloud.', 'GenerateAccess')
+  const deviceKeyError = xcloudDeviceKeyValidationError(deviceKey)
+  if (deviceKeyError) throw new XcloudWorkerError(400, deviceKey ? 'DEVICE_KEY_INVALID' : 'DEVICE_KEY_REQUIRED', deviceKeyError, 'GenerateAccess')
   if (requiresXtream && (!host || !username || !password)) throw new XcloudWorkerError(400, 'XTREAM_REQUIRED', 'Informe host, username e password.', 'GenerateAccess')
   return {
     test_id: null,
@@ -289,7 +293,15 @@ export async function runXcloudWorker(input: XcloudWorkerInput): Promise<XcloudW
     client_id: test.client_id,
     test_id: test.test_id,
     message: 'Worker XCloud iniciado.',
-    metadata: { device_key: test.device_key, retry_stage: input.retry_stage || null, enabled: cfg.enabled, mode: cfg.mode, worker_mode: workerMode },
+    metadata: {
+      device_key: test.device_key,
+      device_key_format: xcloudDeviceKeyDiagnostics(test.device_key),
+      retry_stage: input.retry_stage || null,
+      enabled: cfg.enabled,
+      mode: cfg.mode,
+      worker_mode: workerMode,
+      operator_ref: input.operator_ref || null,
+    },
   })
 
   if (workerMode === 'recreate_device') {

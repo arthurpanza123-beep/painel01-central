@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   Copy, CheckCircle, ArrowRight, ArrowLeft,
   RotateCcw, Zap, Server, User, Phone, ChevronDown,
-  PlayCircle, FileText, X
+  PlayCircle, FileText, X, AlertTriangle
 } from 'lucide-react'
 import { useToast } from '@/components/ui/toast'
 import { cn } from '@/lib/utils'
@@ -29,6 +29,9 @@ interface FormData {
 interface TesteGerado {
   id: string
   clientId?: string
+  status?: string
+  creationCode?: string
+  creationError?: string
   pedido: string
   host: string
   codigo: string
@@ -136,8 +139,7 @@ const SERVIDORES = [
 // Etapas de geração mais detalhadas (melhoria #7)
 const ETAPAS_GERACAO = [
   { id: 'validando',   label: 'Validando cliente' },
-  { id: 'acesso',      label: 'Gerando acesso' },
-  { id: 'playlist',    label: 'Obtendo playlist' },
+  { id: 'acesso',      label: 'Gerando acesso Yellow' },
   { id: 'dispositivo', label: 'Criando device XCloud' },
   { id: 'servidor',    label: 'Vinculando servidor Xtream' },
   { id: 'reload',      label: 'Confirmando RELOAD' },
@@ -169,6 +171,31 @@ function shouldIgnoreEnterShortcut(event: KeyboardEvent): boolean {
 
 function initialGenerationSteps(): GenerationProgressStep[] {
   return ETAPAS_GERACAO.map((step, index) => ({ ...step, status: index === 0 ? 'running' : 'pending' }))
+}
+
+function normalizeDeviceKeyInput(value: string): string {
+  return value
+    .normalize('NFKC')
+    .replace(/[\s\u00a0\u1680\u180e\u2000-\u200f\u2028\u2029\u202f\u205f\u2060\ufeff]+/g, '')
+    .toUpperCase()
+}
+
+function failedGenerationSteps(stage?: string): GenerationProgressStep[] {
+  const stageName = String(stage || '')
+  const failedId = /AttachXtreamCredentials/i.test(stageName)
+    ? 'servidor'
+    : /Completed|Reload/i.test(stageName)
+      ? 'reload'
+      : /Message|Dispatch/i.test(stageName)
+        ? 'mensagem'
+        : /GenerateAccess/i.test(stageName)
+          ? 'acesso'
+          : 'dispositivo'
+  const failedIndex = ETAPAS_GERACAO.findIndex((step) => step.id === failedId)
+  return ETAPAS_GERACAO.map((step, index) => ({
+    ...step,
+    status: index < failedIndex ? 'done' : index === failedIndex ? 'failed' : 'pending',
+  }))
 }
 
 // ----------------------------------------------------------------
@@ -300,6 +327,7 @@ export function GerarTesteWizard() {
 
     const fetchTeste = async (): Promise<TesteGerado | null> => {
       try {
+        const normalizedDeviceKey = form.app === 'xcloud' ? normalizeDeviceKeyInput(form.deviceKey) : ''
         const res = await fetch('/api/tests/create', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -308,13 +336,13 @@ export function GerarTesteWizard() {
             phone: form.telefone,
             app_key: form.app,
             panel_key: form.servidor,
-            device_key: form.app === 'xcloud' ? form.deviceKey : undefined,
+            device_key: form.app === 'xcloud' ? normalizedDeviceKey : undefined,
             operator_ref: operatorRef,
           }),
         })
         const data = await res.json()
-        if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`)
-        if (!data.success) throw new Error(data.error ?? 'Erro desconhecido')
+        if (!res.ok && !data?.test) throw new Error(data.error ?? `HTTP ${res.status}`)
+        if (!data.success && !data?.test) throw new Error(data.error ?? 'Erro desconhecido')
         const xcloudWorker: TesteGerado['xcloudWorker'] | undefined = form.app === 'xcloud' && data.test.id
           ? normalizeXcloudWorker(data.test.xcloud_worker, 'Completed') || pendingXcloudWorker()
           : undefined
@@ -322,6 +350,9 @@ export function GerarTesteWizard() {
         return {
           id:       data.test.id,
           clientId: data.test.client_id || data.client?.id || undefined,
+          status: data.test.status || undefined,
+          creationCode: data.code || undefined,
+          creationError: data.error || undefined,
           pedido:   data.test.pedido || data.test.order_id || '',
           host:     data.test.host || data.test.dns || '',
           codigo:   data.test.provider_code || data.test.code || '',
@@ -365,7 +396,11 @@ export function GerarTesteWizard() {
         setProcessStep(null)
         return
       }
-      setGenerationSteps(ETAPAS_GERACAO.map((step) => ({ ...step, status: 'done' })))
+      if (resultado.xcloudWorker?.status === 'failed') {
+        setGenerationSteps((prev) => prev.some((step) => step.status === 'failed') ? prev : failedGenerationSteps(resultado.xcloudWorker?.stage))
+      } else {
+        setGenerationSteps(ETAPAS_GERACAO.map((step) => ({ ...step, status: 'done' })))
+      }
       setTeste(resultado)
       setProcessStep('sucesso')
     })()
@@ -404,9 +439,19 @@ export function GerarTesteWizard() {
       addToast('error', 'Preencha todos os campos')
       return
     }
-    if (form.app === 'xcloud' && !form.deviceKey.trim()) {
-      addToast('error', 'Informe a device key do XCloud')
-      return
+    if (form.app === 'xcloud') {
+      const normalizedDeviceKey = normalizeDeviceKeyInput(form.deviceKey)
+      if (!normalizedDeviceKey) {
+        addToast('error', 'Informe a device key do XCloud')
+        return
+      }
+      if (normalizedDeviceKey.length < 6) {
+        addToast('error', 'A device key XCloud deve ter pelo menos 6 caracteres')
+        return
+      }
+      if (normalizedDeviceKey !== form.deviceKey) {
+        setForm((prev) => ({ ...prev, deviceKey: normalizedDeviceKey }))
+      }
     }
     setProcessStep('gerando')
   }, [addToast, canProceed, form.app, form.deviceKey])
@@ -432,6 +477,10 @@ export function GerarTesteWizard() {
 
   const handleCopiar = () => {
     if (!teste) return
+    if (form.app === 'xcloud' && teste.xcloudWorker?.status !== 'success') {
+      addToast('error', 'Conclua o XCloud antes de copiar a mensagem do teste')
+      return
+    }
     navigator.clipboard.writeText(teste.mensagem)
     setCopied(true)
     addToast('success', 'Mensagem copiada!')
@@ -440,6 +489,10 @@ export function GerarTesteWizard() {
 
   const handleConcluir = async () => {
     if (!teste?.id) return
+    if (form.app === 'xcloud' && teste.xcloudWorker?.status !== 'success') {
+      addToast('error', 'Conclua o XCloud antes de enviar a mensagem do teste')
+      return
+    }
     if (teste.dispatch?.ok && teste.dispatch.status !== 'failed') {
       addToast('success', teste.dispatch.dry_run ? 'Mensagem preparada no Painel 2' : 'Mensagem de teste já enviada')
       handleNovoTeste()
@@ -482,6 +535,10 @@ export function GerarTesteWizard() {
 
   const handleAtivarCliente = () => {
     if (!teste?.id) return
+    if (form.app === 'xcloud' && teste.xcloudWorker?.status !== 'success') {
+      addToast('error', 'XCloud ainda não concluiu para este teste')
+      return
+    }
     window.dispatchEvent(new CustomEvent('centralplay:navigate', { detail: { page: 'ativar-clientes', test_id: teste.id } }))
     addToast('success', 'Abrindo ativação do cliente')
   }
@@ -519,6 +576,7 @@ export function GerarTesteWizard() {
       const normalized = normalizeXcloudWorker(data, retryStage)!
       setTeste((prev) => prev ? {
         ...prev,
+        status: normalized.status === 'success' ? 'active' : prev.status,
         xcloudWorker: {
           ...normalized,
           message: normalized.status === 'failed' ? `XCloud falhou na etapa: ${normalized.stage}` : normalized.message,
@@ -1075,7 +1133,7 @@ function StepConfirmar({
             label="Device key XCloud"
             placeholder="Informe a chave do dispositivo"
             value={form.deviceKey}
-            onChange={(val) => onChange({ ...form, deviceKey: val })}
+            onChange={(val) => onChange({ ...form, deviceKey: normalizeDeviceKeyInput(val) })}
           />
         </div>
       )}
@@ -1307,6 +1365,11 @@ function TelaSucesso({
 }) {
   const appLabel = APPS.find((a) => a.id === form.app)?.label ?? form.app
   const servidorLabel = SERVIDORES.find((s) => s.id === form.servidor)?.label ?? form.servidor
+  const xcloudBlocked = form.app === 'xcloud' && teste.xcloudWorker?.status !== 'success'
+  const xcloudFailed = form.app === 'xcloud' && teste.xcloudWorker?.status === 'failed'
+  const dispatchSent = teste.dispatch?.status === 'sent' || teste.dispatch?.ok === true
+  const dispatchPrepared = teste.dispatch?.dry_run === true || teste.dispatch?.status === 'dry_run'
+  const dispatchPending = Boolean(teste.dispatch) && !dispatchSent && !dispatchPrepared
   const recreateStages = [
     { stage: 'FindXcloudDevice', label: 'Localizando device', done: teste.xcloudWorker?.device_found },
     { stage: 'DeactivateXcloudDevice', label: 'Desativando device', done: teste.xcloudWorker?.device_deactivated },
@@ -1331,18 +1394,18 @@ function TelaSucesso({
         <div
           className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full"
           style={{
-            background: 'rgba(34,197,94,0.12)',
-            border: '1px solid rgba(34,197,94,0.3)',
-            boxShadow: '0 0 40px rgba(34,197,94,0.25)',
+            background: xcloudFailed ? 'rgba(239,68,68,0.12)' : 'rgba(34,197,94,0.12)',
+            border: xcloudFailed ? '1px solid rgba(239,68,68,0.3)' : '1px solid rgba(34,197,94,0.3)',
+            boxShadow: xcloudFailed ? '0 0 40px rgba(239,68,68,0.22)' : '0 0 40px rgba(34,197,94,0.25)',
           }}
         >
-          <CheckCircle className="h-10 w-10 text-emerald-400" />
+          {xcloudFailed ? <AlertTriangle className="h-10 w-10 text-red-300" /> : <CheckCircle className="h-10 w-10 text-emerald-400" />}
         </div>
         <h1 className="text-2xl font-bold text-white" style={{ fontFamily: 'var(--font-display)' }}>
-          Teste gerado com sucesso!
+          {xcloudFailed ? 'XCloud falhou' : 'Teste gerado com sucesso!'}
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Pronto para enviar para {form.nome}
+          {xcloudFailed ? 'Yellow gerou as credenciais, mas a device ainda não foi ativada.' : `Pronto para enviar para ${form.nome}`}
         </p>
         {/* Badge indicando se foi gravado no Supabase ou só em memória */}
         <div className="mt-3 inline-flex items-center gap-1.5 rounded-full px-3 py-1" style={{
@@ -1412,7 +1475,7 @@ function TelaSucesso({
             style={{ background: 'rgba(37,99,235,0.04)', border: '1px solid rgba(37,99,235,0.1)' }}
           >
             <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider" style={{ color: '#1e3a5f' }}>
-              Prévia da mensagem
+              {xcloudBlocked ? 'Mensagem bloqueada até concluir XCloud' : 'Prévia da mensagem'}
             </p>
             <pre className="whitespace-pre-wrap font-sans text-xs leading-relaxed text-slate-400">
               {teste.mensagem}
@@ -1452,7 +1515,7 @@ function TelaSucesso({
               ) : (
                 <div className="mt-3 grid grid-cols-3 gap-2">
                   <button disabled={executandoXcloud} onClick={onRetryXcloud} className="rounded-lg px-2 py-2 text-xs font-medium text-slate-200 disabled:opacity-60" style={{ background: 'rgba(37,99,235,0.12)', border: '1px solid rgba(37,99,235,0.2)' }}>
-                    {executandoXcloud ? 'Executando XCloud real...' : teste.xcloudWorker.status === 'pending' || teste.xcloudWorker.status === 'disabled' ? 'Executar XCloud real' : 'Tentar novamente'}
+                    {executandoXcloud ? 'Executando XCloud real...' : teste.xcloudWorker.status === 'pending' || teste.xcloudWorker.status === 'disabled' ? 'Executar XCloud real' : 'Tentar XCloud novamente'}
                   </button>
                   <button onClick={onModoManual} className="rounded-lg px-2 py-2 text-xs font-medium text-slate-200" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
                     Modo manual
@@ -1465,7 +1528,7 @@ function TelaSucesso({
               <div className="mt-3 rounded-xl p-3" style={{ background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.06)' }}>
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <div>
-                    <p className="text-xs font-semibold text-slate-200">Recriar device XCloud</p>
+                    <p className="text-xs font-semibold text-slate-200">{teste.xcloudWorker.device_already_exists ? 'Device já existe — recriar device' : 'Recriar device XCloud'}</p>
                     <p className="mt-0.5 text-[11px] text-slate-500">Use apenas para trocar acesso do cliente ou corrigir vínculo do XCloud.</p>
                   </div>
                   <button
@@ -1518,9 +1581,9 @@ function TelaSucesso({
           )}
 
           {teste.dispatch && (
-            <div className="mb-5 rounded-xl p-3" style={{ background: teste.dispatch.status === 'failed' ? 'rgba(239,68,68,0.06)' : 'rgba(34,197,94,0.06)', border: `1px solid ${teste.dispatch.status === 'failed' ? 'rgba(239,68,68,0.16)' : 'rgba(34,197,94,0.16)'}` }}>
-              <p className="text-xs font-semibold" style={{ color: teste.dispatch.status === 'failed' ? '#fca5a5' : '#86efac' }}>
-                {teste.dispatch.status === 'failed' ? 'Mensagem não enviada' : teste.dispatch.dry_run ? 'Mensagem preparada' : 'Mensagem enviada ao cliente'}
+            <div className="mb-5 rounded-xl p-3" style={{ background: dispatchPending ? 'rgba(239,68,68,0.06)' : 'rgba(34,197,94,0.06)', border: `1px solid ${dispatchPending ? 'rgba(239,68,68,0.16)' : 'rgba(34,197,94,0.16)'}` }}>
+              <p className="text-xs font-semibold" style={{ color: dispatchPending ? '#fca5a5' : '#86efac' }}>
+                {dispatchPending ? 'Mensagem não enviada' : dispatchPrepared ? 'Mensagem preparada' : 'Mensagem enviada ao cliente'}
               </p>
               {teste.dispatch.message && <p className="mt-1 text-[11px] text-slate-500">{teste.dispatch.message}</p>}
             </div>
@@ -1534,11 +1597,13 @@ function TelaSucesso({
           >
             <button
               onClick={onCopiar}
+              disabled={xcloudBlocked}
               className="flex h-12 items-center justify-center gap-2 rounded-xl text-sm font-medium transition-all hover:bg-white/[0.07]"
               style={{
                 background: 'rgba(255,255,255,0.04)',
                 border: '1px solid rgba(255,255,255,0.08)',
                 color: '#94a3b8',
+                opacity: xcloudBlocked ? 0.5 : 1,
               }}
             >
               {copied ? <CheckCircle className="h-[18px] w-[18px] text-emerald-400" /> : <Copy className="h-[18px] w-[18px]" />}
@@ -1546,14 +1611,15 @@ function TelaSucesso({
             </button>
             <button
               onClick={onConcluir}
+              disabled={xcloudBlocked}
               className="flex h-12 items-center justify-center gap-2 rounded-xl text-sm font-bold text-white transition-all"
               style={{
-                background: 'linear-gradient(135deg, #22c55e, #16a34a)',
-                boxShadow: '0 4px 20px rgba(34,197,94,0.35)',
+                background: xcloudBlocked ? 'rgba(100,116,139,0.35)' : 'linear-gradient(135deg, #22c55e, #16a34a)',
+                boxShadow: xcloudBlocked ? 'none' : '0 4px 20px rgba(34,197,94,0.35)',
               }}
             >
               <CheckCircle className="h-[18px] w-[18px]" />
-              Concluir
+              {xcloudBlocked ? 'Aguardando XCloud' : 'Concluir'}
             </button>
           </motion.div>
 
@@ -1565,11 +1631,13 @@ function TelaSucesso({
           >
             <button
               onClick={onAtivarCliente}
+              disabled={xcloudBlocked}
               className="flex h-11 items-center justify-center gap-2 rounded-xl text-sm font-medium transition-all hover:bg-white/[0.05]"
               style={{
                 background: 'rgba(34,197,94,0.06)',
                 border: '1px solid rgba(34,197,94,0.14)',
                 color: '#86efac',
+                opacity: xcloudBlocked ? 0.45 : 1,
               }}
             >
               <PlayCircle className="h-[18px] w-[18px]" />
