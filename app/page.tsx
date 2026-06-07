@@ -156,6 +156,7 @@ export default function App() {
       <GameModeToggle settings={settings} busy={settingsBusy} onToggle={toggleGameMode} />
       <button
         onClick={() => setMobileMenuOpen(true)}
+        aria-label="Abrir menu"
         className="fixed md:hidden flex h-11 w-11 items-center justify-center rounded-xl text-white"
         style={{
           top: 'calc(12px + env(safe-area-inset-top))',
@@ -166,7 +167,6 @@ export default function App() {
           boxShadow: '0 8px 22px rgba(0,0,0,0.34)',
           backdropFilter: 'blur(6px)',
         }}
-        aria-label="Abrir menu"
       >
         <Menu className="h-5 w-5" />
       </button>

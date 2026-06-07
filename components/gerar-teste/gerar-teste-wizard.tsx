@@ -222,10 +222,10 @@ function NeonBackground() {
       <div
         className="absolute hidden rounded-full md:block"
         style={{
-          width: 480,
-          height: 480,
+          width: 420,
+          height: 420,
           top: '8%',
-          right: '-12%',
+          right: '0%',
           background: 'radial-gradient(circle, rgba(20,184,166,0.06) 0%, rgba(20,184,166,0.02) 55%, transparent 70%)',
         }}
       />
@@ -661,17 +661,16 @@ export function GerarTesteWizard() {
               <div key={step} className="flex items-center">
                 <div
                   className={cn(
-                    'flex h-12 w-12 items-center justify-center rounded-full font-bold transition-all duration-300',
+                    'flex h-10 w-10 items-center justify-center rounded-full text-sm font-bold transition-all duration-300 sm:h-12 sm:w-12 sm:text-base',
                     wizardStep === step
                       ? 'bg-primary text-white shadow-lg shadow-primary/30'
                       : wizardStep > step
                         ? 'bg-emerald-500 text-white'
                         : 'bg-card border border-border text-muted-foreground'
                   )}
-                  style={{ fontSize: 16 }}
                 >
                   {wizardStep > step ? (
-                    <CheckCircle className="h-6 w-6" />
+                    <CheckCircle className="h-5 w-5 sm:h-6 sm:w-6" />
                   ) : (
                     step
                   )}
@@ -680,7 +679,7 @@ export function GerarTesteWizard() {
                   <div
                     className={cn(
                       'h-1 rounded-full transition-all duration-500',
-                      'w-14 sm:w-20 md:w-24 mx-1.5',
+	                      'w-7 sm:w-20 md:w-24 mx-1.5',
                       wizardStep > step ? 'bg-emerald-500' : 'bg-border'
                     )}
                   />

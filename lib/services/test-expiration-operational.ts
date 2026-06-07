@@ -119,6 +119,6 @@ export function needsOperationalExpirationAction(input: {
   metadata?: JsonRecord | null
 }): boolean {
   const status = String(input.status || '').trim().toLowerCase()
-  if (!['active', 'generating', 'pending', 'expired'].includes(status)) return false
+  if (!['active', 'generating', 'pending'].includes(status)) return false
   return !getOperationalExpirationState(input).complete
 }

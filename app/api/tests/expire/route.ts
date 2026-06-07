@@ -76,6 +76,9 @@ async function dispatchOperatorExpiredNotice(db: NonNullable<ReturnType<typeof g
   expiredAt: string
   operatorRef: string
   source: 'manual' | 'auto'
+  providerUrl: string
+  xcloudRemoveStatus: string
+  manualCloseRequired: boolean
 }) {
   const operatorIdempotencyKey = `operator_test_expired:${input.test.id}`
   if (isOperatorNoticeSent(input.metadata)) {
@@ -98,6 +101,9 @@ async function dispatchOperatorExpiredNotice(db: NonNullable<ReturnType<typeof g
         username: input.username,
         expired_at: formatDateTimeBR(input.expiredAt),
         link,
+        provider_url: input.providerUrl,
+        xcloud_remove_status: input.xcloudRemoveStatus,
+        manual_close_required: input.manualCloseRequired,
       },
       context: {
         source: input.source === 'auto' ? 'painel1_expire_due' : 'painel1',
@@ -107,6 +113,9 @@ async function dispatchOperatorExpiredNotice(db: NonNullable<ReturnType<typeof g
         clientPhone: input.client?.phone_e164 || '',
         expiredAt: formatDateTimeBR(input.expiredAt),
         link,
+        provider_url: input.providerUrl,
+        xcloud_remove_status: input.xcloudRemoveStatus,
+        manual_close_required: input.manualCloseRequired,
         idempotency_key: operatorIdempotencyKey,
       },
     }),
@@ -443,15 +452,6 @@ export async function POST(req: NextRequest) {
       }
       xcloudRemove = { ok: true, not_required: true, status: 'not_required' }
       await db.from('tests').update({ legacy_metadata: operationalMetadata }).eq('id', test.id).then(() => null)
-    } else if (body.source === 'auto') {
-      xcloudRemove = { skipped: true, reason: 'auto_expire_requires_operator_confirmation' }
-      await writeTestLog(db, 'XCLOUD_REMOVE_SKIPPED_AUTO_EXPIRE', 'info', {
-        client_id: test.client_id,
-        test_id: test.id,
-        account_id: test.account_id,
-        message: 'Expiracao automatica nao remove device XCloud sem confirmacao do operador.',
-        metadata: { source: 'expire_due' },
-      })
     } else if (xcloudState.satisfied) {
       const xcloudFinishedAt = metadataString(operationalMetadata, 'xcloud_device_removed_at') || metadataString(operationalMetadata, 'expired_xcloud_remove_finished_at') || new Date().toISOString()
       operationalMetadata = {
@@ -471,12 +471,13 @@ export async function POST(req: NextRequest) {
         xcloud_device_remove_status: 'running',
       }
       await db.from('tests').update({ legacy_metadata: operationalMetadata }).eq('id', test.id).then(() => null)
+      const expireSource = body.source === 'auto' ? 'auto_expire' : 'manual_expire'
       await writeTestLog(db, 'XCLOUD_DEVICE_REMOVAL_STARTED', 'info', {
         client_id: test.client_id,
         test_id: test.id,
         account_id: test.account_id,
-        message: 'Remocao manual da device XCloud iniciada na expiracao.',
-        metadata: { source: 'manual_expire' },
+        message: body.source === 'auto' ? 'Remocao automatica da device XCloud iniciada na expiracao.' : 'Remocao manual da device XCloud iniciada na expiracao.',
+        metadata: { source: expireSource },
       })
       try {
         xcloudRemove = await runXcloudWorker({
@@ -492,7 +493,7 @@ export async function POST(req: NextRequest) {
           test_id: test.id,
           account_id: test.account_id,
           message: error instanceof Error ? error.message : 'Falha ao remover device XCloud na expiracao.',
-          metadata: { source: 'test_expire' },
+          metadata: { source: expireSource },
         })
       }
 
@@ -513,8 +514,10 @@ export async function POST(req: NextRequest) {
         client_id: test.client_id,
         test_id: test.id,
         account_id: test.account_id,
-        message: xcloudRemoved ? 'Remocao manual da device XCloud finalizada na expiracao.' : 'Remocao manual da device XCloud nao foi confirmada.',
-        metadata: { source: 'manual_expire', result: xcloudRemove as JsonRecord },
+        message: xcloudRemoved
+          ? (body.source === 'auto' ? 'Remocao automatica da device XCloud finalizada na expiracao.' : 'Remocao manual da device XCloud finalizada na expiracao.')
+          : (body.source === 'auto' ? 'Remocao automatica da device XCloud nao foi confirmada.' : 'Remocao manual da device XCloud nao foi confirmada.'),
+        metadata: { source: expireSource, result: xcloudRemove as JsonRecord },
       })
     }
 
@@ -523,21 +526,13 @@ export async function POST(req: NextRequest) {
       client_id: test.client_id,
       test_id: test.id,
       account_id: test.account_id,
-      message: body.source === 'auto' ? 'Expiracao automatica: dispatch de cliente ignorado.' : stickerAlreadySentBeforeDispatch ? 'Figurinha test_expired ja registrada; dispatch nao sera duplicado.' : 'Disparo test_expired iniciado em background.',
+      message: stickerAlreadySentBeforeDispatch ? 'Figurinha test_expired ja registrada; dispatch nao sera duplicado.' : 'Disparo test_expired iniciado em background.',
       metadata: { phone: client?.phone_e164 ? 'present' : 'missing', already_sent: stickerAlreadySentBeforeDispatch, idempotency_key: idempotencyKey },
     })
 
     let dispatchResult: unknown = null
     let operatorNoticeResult: unknown = null
-    if (body.source === 'auto') {
-      dispatchResult = { ok: true, skipped: true, reason: 'auto_expire_operator_notice_only', idempotency_key: idempotencyKey }
-      operationalMetadata = {
-        ...operationalMetadata,
-        expired_dispatch_status: metadataString(metadata, 'expired_dispatch_status') || 'skipped_auto',
-        expired_dispatch_running_at: undefined,
-      }
-      await db.from('tests').update({ legacy_metadata: operationalMetadata }).eq('id', test.id).then(() => null)
-    } else if (stickerAlreadySentBeforeDispatch) {
+    if (stickerAlreadySentBeforeDispatch) {
       const finishedAt = metadataString(operationalMetadata, 'customer_expired_sticker_sent_at') || metadataString(operationalMetadata, 'expired_dispatch_sent_at') || new Date().toISOString()
       dispatchResult = { ok: true, already_sent: true, skipped: true, reason: 'already_sent', idempotency_key: idempotencyKey }
       operationalMetadata = {
@@ -574,7 +569,7 @@ export async function POST(req: NextRequest) {
             expires_at: expiredAt,
           },
           context: {
-            source: 'painel1',
+            source: body.source === 'auto' ? 'painel1_expire_due' : 'painel1',
             operator_ref: operatorRef,
             test_id: test.id,
             client_id: test.client_id || '',
@@ -651,6 +646,22 @@ export async function POST(req: NextRequest) {
       })
     }
 
+      const noticeXcloudState = getXcloudRemovalState({
+        appKey: app?.key,
+        appName: app?.name,
+        deviceKey: test.device_key,
+        metadata: operationalMetadata,
+      })
+      const xcloudRemoveStatus = noticeXcloudState.required
+        ? noticeXcloudState.alreadyRemoved
+          ? 'ja removido'
+          : noticeXcloudState.removed
+            ? 'removido automaticamente'
+            : noticeXcloudState.status === 'failed'
+              ? 'falhou'
+              : 'pendente'
+        : 'nao se aplica'
+
 	    operatorNoticeResult = await dispatchOperatorExpiredNotice(db, {
 	      test,
 	      metadata: operationalMetadata,
@@ -660,6 +671,9 @@ export async function POST(req: NextRequest) {
       username,
       expiredAt,
       operatorRef,
+      providerUrl,
+      xcloudRemoveStatus,
+      manualCloseRequired: !noticeXcloudState.required,
 	      source: body.source === 'auto' ? 'auto' : 'manual',
 	    }).catch((error) => ({ ok: false, error: error instanceof Error ? error.message : String(error) }))
 
@@ -674,8 +688,15 @@ export async function POST(req: NextRequest) {
 	      deviceKey: test.device_key,
 	      metadata: operationalMetadata,
 	    })
-	    const canCompleteOperationalAction = body.source !== 'auto' && completionCheck.customerStickerSatisfied && completionCheck.xcloudRemovalSatisfied
+	    const canCompleteOperationalAction = completionCheck.customerStickerSatisfied && completionCheck.xcloudRemovalSatisfied && (body.source !== 'auto' || completionCheck.xcloud.required)
 	    const completionAt = metadataString(operationalMetadata, 'operator_expire_action_completed_at') || new Date().toISOString()
+	    const operatorPendingReason = !completionCheck.customerStickerSatisfied
+	      ? 'customer_sticker_pending'
+	      : !completionCheck.xcloudRemovalSatisfied
+	        ? 'xcloud_remove_pending'
+	        : body.source === 'auto' && !completionCheck.xcloud.required
+	          ? 'provider_manual_close_required'
+	          : 'operator_action_pending'
 
 	    operationalMetadata = canCompleteOperationalAction ? {
 	      ...operationalMetadata,
@@ -686,7 +707,7 @@ export async function POST(req: NextRequest) {
 	    } : {
 	      ...operationalMetadata,
 	      operator_expire_action_status: metadataString(operationalMetadata, 'operator_expire_action_status') === 'completed' ? 'completed' : 'pending',
-	      operator_expire_action_pending_reason: !completionCheck.customerStickerSatisfied ? 'customer_sticker_pending' : !completionCheck.xcloudRemovalSatisfied ? 'xcloud_remove_pending' : 'auto_expire',
+	      operator_expire_action_pending_reason: operatorPendingReason,
 	    }
 	    await db.from('tests').update({ legacy_metadata: operationalMetadata }).eq('id', test.id).then(() => null)
 
@@ -702,7 +723,10 @@ export async function POST(req: NextRequest) {
 	    const customerStickerStatus = metadataString(operationalMetadata, 'customer_expired_sticker_status')
 	    const alreadySent = Boolean(dispatchRecord?.already_sent || customerStickerStatus === 'already_sent')
 	    const xcloudRemoveResponse = xcloudRemove || xcloudResponseFromState(xcloudState)
-	    const pendingReason = finalState.complete ? null : !finalState.customerStickerSatisfied ? 'customer_sticker_pending' : !finalState.xcloudRemovalSatisfied ? 'xcloud_remove_pending' : 'operator_action_pending'
+		    const pendingReason = finalState.complete
+          ? null
+          : metadataString(operationalMetadata, 'operator_expire_action_pending_reason') ||
+            (!finalState.customerStickerSatisfied ? 'customer_sticker_pending' : !finalState.xcloudRemovalSatisfied ? 'xcloud_remove_pending' : 'operator_action_pending')
 
 	    return NextResponse.json({
 	      ok: true,

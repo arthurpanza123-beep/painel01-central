@@ -48,7 +48,7 @@ function LogLine({ log }: { log: LogEntry }) {
 // ——— Page ———
 export function DebugPage() {
   const [logs, setLogs] = useState(MOCK_LOGS)
-  const [dataSource, setDataSource] = useState<'mock' | 'supabase'>('mock')
+  const [, setDataSource] = useState<'mock' | 'supabase'>('mock')
   const [filter, setFilter] = useState<string>('todos')
   const { addToast } = useToast()
 
@@ -98,7 +98,7 @@ export function DebugPage() {
   return (
     <div className="flex flex-col h-screen" style={{ background: '#0a0c10' }}>
       {/* Header minimo */}
-      <div className="shrink-0 px-6 py-5 flex items-center justify-between border-b" style={{ borderColor: 'rgba(255,255,255,0.04)' }}>
+      <div className="shrink-0 px-4 py-5 sm:px-6 flex flex-col gap-3 border-b sm:flex-row sm:items-center sm:justify-between" style={{ borderColor: 'rgba(255,255,255,0.04)' }}>
         <div className="flex items-center gap-3">
           <div 
             className="h-10 w-10 rounded-xl flex items-center justify-center"
@@ -109,15 +109,11 @@ export function DebugPage() {
           <div>
             <h1 className="text-lg font-semibold text-white">Logs</h1>
             <p className="text-xs text-slate-500">{metricas.total} logs · {metricas.erros} erros</p>
-            <p className="mt-1 inline-flex items-center gap-2 rounded-full px-2.5 py-0.5 text-[10px] font-medium"
-               style={{ background: dataSource === 'supabase' ? 'rgba(34,197,94,0.12)' : 'rgba(245,158,11,0.12)', color: dataSource === 'supabase' ? '#4ade80' : '#fbbf24' }}>
-              Fonte: {dataSource === 'supabase' ? 'Supabase' : 'Mock'}
-            </p>
           </div>
         </div>
 
         {/* Acoes */}
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={handleCopy}
             className="h-8 px-3 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors"
@@ -138,7 +134,7 @@ export function DebugPage() {
       </div>
 
       {/* Filtros */}
-      <div className="shrink-0 px-6 py-3 border-b flex items-center gap-2" style={{ borderColor: 'rgba(255,255,255,0.04)' }}>
+      <div className="shrink-0 px-4 py-3 sm:px-6 border-b flex flex-wrap items-center gap-2" style={{ borderColor: 'rgba(255,255,255,0.04)' }}>
         {[
           { id: 'todos', label: 'Todos', count: metricas.total },
           { id: 'erro', label: 'Erros', count: metricas.erros, color: '#ef4444' },

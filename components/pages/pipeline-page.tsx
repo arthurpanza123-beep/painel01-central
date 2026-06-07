@@ -20,7 +20,7 @@ const ETAPAS: { id: EtapaPipeline; label: string; color: string; glow: string }[
 
 export function PipelinePage() {
   const [leads, setLeads] = useState<LeadPipeline[]>(MOCK_PIPELINE)
-  const [dataSource, setDataSource] = useState<'mock' | 'supabase'>('mock')
+  const [, setDataSource] = useState<'mock' | 'supabase'>('mock')
   const [selecionado, setSelecionado] = useState<LeadPipeline | null>(null)
   const { addToast } = useToast()
 
@@ -75,17 +75,17 @@ export function PipelinePage() {
         </div>
 
         {/* Resumo do funil — contagem por etapa */}
-        <div className="flex gap-2 overflow-x-auto pb-2 mb-6">
+        <div className="mb-6 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
           {ETAPAS.map(e => {
             const count = leads.filter(l => l.etapa === e.id).length
             return (
               <div
                 key={e.id}
-                className="flex items-center gap-2 rounded-lg px-3 py-2 shrink-0"
+                className="flex min-w-0 items-center gap-2 rounded-lg px-3 py-2"
                 style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
               >
                 <span className="h-2 w-2 rounded-full" style={{ background: e.color }} />
-                <span className="text-xs text-slate-400">{e.label}</span>
+	                <span className="min-w-0 flex-1 truncate text-xs text-slate-400">{e.label}</span>
                 <span className="text-xs font-bold text-white">{count}</span>
               </div>
             )
@@ -93,11 +93,11 @@ export function PipelinePage() {
         </div>
 
         {/* Kanban */}
-        <div className="flex gap-3 overflow-x-auto pb-4">
+        <div className="grid grid-cols-1 gap-3 pb-4 md:flex md:overflow-x-auto">
           {ETAPAS.map(etapa => {
             const cards = leads.filter(l => l.etapa === etapa.id)
             return (
-              <div key={etapa.id} className="shrink-0" style={{ width: 220 }}>
+	              <div key={etapa.id} className="w-full min-w-0 md:w-[220px] md:shrink-0">
                 {/* Cabeçalho coluna */}
                 <div className="flex items-center justify-between mb-3 px-1">
                   <div className="flex items-center gap-2">

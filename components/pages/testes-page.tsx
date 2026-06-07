@@ -152,8 +152,8 @@ function TesteCard({
 
         {/* Info */}
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
-            <h3 className="text-sm font-semibold text-white truncate">{teste.cliente}</h3>
+          <div className="flex flex-wrap items-center gap-2 mb-1">
+            <h3 className="min-w-[9rem] flex-1 truncate text-sm font-semibold text-white">{teste.cliente}</h3>
             <span
               className="text-[10px] font-medium px-2 py-0.5 rounded-full shrink-0"
               style={{ background: `${cfg.color}15`, color: cfg.color }}
@@ -535,10 +535,9 @@ export function TestesPage() {
     <AnimatePresence>
       {modalExpirar && (
         <ConfirmModal
-          title="Expirar e enviar figurinha"
-          description={expiringTestId === modalExpirar.id ? 'Expirando teste, copiando usuario, abrindo painel e enviando figurinha. Aguarde.' : 'Vou copiar o usuário, abrir o painel do provedor, marcar o teste como expirado e enviar a figurinha.'}
-          confirmLabel={expiringTestId === modalExpirar.id ? 'Expirando...' : 'Expirar e enviar figurinha'}
-          danger
+          title="Encerrar agora"
+          description={expiringTestId === modalExpirar.id ? 'Encerrando teste, copiando usuario e abrindo o painel. Aguarde.' : 'Fallback manual: vou copiar o usuário, abrir o painel do provedor e acionar a expiração idempotente.'}
+          confirmLabel={expiringTestId === modalExpirar.id ? 'Encerrando...' : 'Encerrar agora'}
           disabled={expiringTestId === modalExpirar.id}
           blockedPanelUrl={blockedPanelUrl}
           onClose={() => {

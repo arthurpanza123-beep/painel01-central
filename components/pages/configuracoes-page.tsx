@@ -204,7 +204,7 @@ export function ConfiguracoesPage() {
   const { addToast } = useToast()
 
   return (
-    <div className="flex-1 flex flex-col items-center px-6 py-10 min-h-screen">
+    <div className="flex-1 flex flex-col items-center px-4 py-10 sm:px-6 min-h-screen">
       {/* Header */}
       <div className="text-center mb-10 max-w-xl">
         <div className="flex items-center justify-center gap-2 mb-3">
@@ -261,16 +261,16 @@ export function ConfiguracoesPage() {
           <div className="rounded-xl p-5 space-y-4" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.04)' }}>
             <div>
               <label className="text-xs text-slate-500 block mb-1.5">Nova senha</label>
-              <div className="flex gap-2">
+	              <div className="flex flex-col gap-2 sm:flex-row">
                 <input
                   type="password"
                   placeholder="••••••••"
-                  className="flex-1 h-9 px-3 rounded-lg text-sm text-white outline-none"
+	                className="h-9 min-w-0 flex-1 px-3 rounded-lg text-sm text-white outline-none"
                   style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}
                 />
                 <button
                   onClick={() => addToast('success', 'Senha atualizada')}
-                  className="h-9 px-4 rounded-lg text-xs font-medium flex items-center gap-1.5"
+	                  className="h-9 px-4 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 sm:shrink-0"
                   style={{ background: 'rgba(59,130,246,0.1)', color: '#60a5fa' }}
                 >
                   <Save className="h-3.5 w-3.5" />
