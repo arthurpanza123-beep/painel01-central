@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { motion } from 'framer-motion'
+import { m as motion } from 'framer-motion'
 import {
   TestTube2, Users, ClipboardList, Wallet, Zap,
   ArrowUpRight, Activity, Clock

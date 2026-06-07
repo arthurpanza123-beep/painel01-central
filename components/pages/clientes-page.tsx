@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { motion } from 'framer-motion'
+import { m as motion } from 'framer-motion'
 import {
   Users, Search, Phone, Package, Server, Calendar, DollarSign,
   RefreshCw, Eye, Key, Tv2, Sparkles, X, Loader2,

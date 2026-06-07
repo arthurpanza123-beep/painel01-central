@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import dynamic from 'next/dynamic'
-import { AnimatePresence, motion } from 'framer-motion'
+import { m as motion, AnimatePresence } from 'framer-motion'
 import {
   AlertTriangle,
   Clock3,

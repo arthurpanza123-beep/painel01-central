@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { m as motion, AnimatePresence } from 'framer-motion'
 import {
   Copy, CheckCircle, ArrowRight, ArrowLeft,
   RotateCcw, Zap, Server, User, Phone, ChevronDown,

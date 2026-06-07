@@ -1,6 +1,6 @@
 'use client'
 
-import { motion } from 'framer-motion'
+import { m as motion } from 'framer-motion'
 import { MessageCircle, Phone, Package } from 'lucide-react'
 import type { Renovacao } from '@/lib/mock-data'
 import { StatusBadge } from './status-badge'

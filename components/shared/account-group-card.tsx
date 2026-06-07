@@ -1,6 +1,6 @@
 'use client'
 
-import { motion } from 'framer-motion'
+import { m as motion } from 'framer-motion'
 import { Layers, Eye, Calendar, Tv2, UserPlus } from 'lucide-react'
 import type { Conta } from '@/lib/mock-data'
 

@@ -1,17 +1,18 @@
 'use client'
 
-import { MotionConfig } from 'framer-motion'
+import { LazyMotion, MotionConfig, domAnimation } from 'framer-motion'
 import { useEffect, useState } from 'react'
 
 /**
  * Otimiza desempenho em celulares fracos.
  *
- * - Em telas pequenas (mobile) ou aparelhos com pouca CPU/memoria, desliga as
- *   animacoes do framer-motion (reducedMotion="always"), eliminando o custo de
- *   layout/paint das entradas escalonadas a cada troca de aba e melhorando a
- *   fluidez de scroll.
- * - Em desktop, mantem as animacoes normais, apenas respeitando a preferencia
- *   de sistema "reduzir movimento".
+ * 1. LazyMotion + domAnimation: carrega apenas o nucleo leve (~5KB) do
+ *    framer-motion no bundle inicial, em vez da biblioteca inteira (~34KB).
+ *    Reduz download + parse de JS, o maior gargalo em aparelhos fracos.
+ *    Exige usar o componente `m` (alias `motion`) em vez de `motion` direto.
+ * 2. MotionConfig: em mobile/reduced-motion desliga as animacoes de entrada
+ *    (transform/layout escalonados), eliminando travamento na troca de abas
+ *    e melhorando a fluidez de scroll. Estado final aplicado instantaneamente.
  */
 export function PerfProvider({ children }: { children: React.ReactNode }) {
   const [lowPower, setLowPower] = useState(false)
@@ -35,8 +36,10 @@ export function PerfProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   return (
-    <MotionConfig reducedMotion={lowPower ? 'always' : 'user'}>
-      {children}
-    </MotionConfig>
+    <LazyMotion features={domAnimation} strict>
+      <MotionConfig reducedMotion={lowPower ? 'always' : 'user'}>
+        {children}
+      </MotionConfig>
+    </LazyMotion>
   )
 }

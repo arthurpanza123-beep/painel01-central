@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { AnimatePresence, motion } from 'framer-motion'
+import { m as motion, AnimatePresence } from 'framer-motion'
 import { CheckCircle, ChevronRight, Search, UserPlus, Users, Zap } from 'lucide-react'
 
 import { useToast } from '@/components/ui/toast'
