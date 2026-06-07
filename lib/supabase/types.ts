@@ -215,6 +215,8 @@ export interface DashboardMetrics {
   /** Financeiro */
   available_credits: number
   revenue_current_month: number
+  /** Soma do valor mensal de todos os clientes ativos (base da projeção de renovação) */
+  monthly_renewal_base?: number
   monthly_renewal_forecast?: number
   revenue_due_30d?: number
   revenue_forecast_30d: number

@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { m as motion } from 'framer-motion'
 import {
   TestTube2, Users, ClipboardList, Zap,
-  ArrowUpRight, Activity, Clock
+  ArrowUpRight, Activity, Clock, TrendingUp, Eye
 } from 'lucide-react'
 import type { NavPage } from '@/app/page'
 // MOCK: importação direta dos mocks — usada como fallback quando metrics não é passado
@@ -12,7 +12,7 @@ import type { NavPage } from '@/app/page'
 //   no Server Component pai (app/page.tsx) e os dados forem passados via props.
 import {
   MOCK_TESTES, MOCK_CLIENTES, MOCK_PIPELINE,
-  calcularMetricasFinanceiro, calcularMetricasPipeline,
+  calcularMetricasPipeline,
 } from '@/lib/mock-data'
 import type { DashboardMetrics } from '@/lib/supabase/types'
 
@@ -47,27 +47,21 @@ export function DashboardPage({ onNavigate, metrics }: DashboardPageProps) {
 
   // ── Fallback para mock quando metrics não for fornecido (estado atual) ──
   // MOCK: bloco abaixo é temporário — remover quando metrics vier do Supabase
-  const fin  = calcularMetricasFinanceiro()
   const pipe = calcularMetricasPipeline()
 
   const testesAtivos   = dashboardMetrics?.active_tests        ?? MOCK_TESTES.filter(t => t.status === 'ativo').length
   const testesHoje     = dashboardMetrics?.total_tests         ?? MOCK_TESTES.length
   const operacaoHoje   = dashboardMetrics?.leads_in_progress   ?? MOCK_PIPELINE.filter(l => l.etapa !== 'ativado' && l.etapa !== 'renovacao').length
   const clientesAtivos = dashboardMetrics?.active_clients      ?? MOCK_CLIENTES.filter(c => c.status === 'ativo').length
-  const receitaPrevista = dashboardMetrics?.monthly_renewal_forecast ?? dashboardMetrics?.revenue_forecast_30d ?? fin.receitaPrevista30d
+
+  // Base mensal de renovação = soma do valor de TODOS os clientes ativos
+  const renovacaoBase = dashboardMetrics?.monthly_renewal_base
+    ?? MOCK_CLIENTES.filter(c => c.status === 'ativo').reduce((acc, c) => acc + (c.valor ?? 0), 0)
 
   // Ambientes ativados hoje (clientes ativados na data de hoje)
   const hojeBR = new Date().toLocaleDateString('pt-BR')
   const ativadosHoje = dashboardMetrics?.activated_today
     ?? MOCK_CLIENTES.filter(c => c.criadoEm === hojeBR).length
-
-  const serie = [
-    { label: 'Hoje', value: dashboardMetrics?.revenue_current_month  ?? fin.receitaMesAtual },
-    { label: '30d',  value: dashboardMetrics?.revenue_forecast_30d   ?? fin.receitaPrevista30d },
-    { label: '60d',  value: dashboardMetrics?.revenue_forecast_60d   ?? fin.receitaPrevista60d },
-    { label: '90d',  value: dashboardMetrics?.revenue_forecast_90d   ?? fin.receitaPrevista90d },
-  ]
-  const maxSerie = Math.max(...serie.map(s => s.value), 1)
 
   // MOCK: funil vem do pipe mock ou de metrics.funnel
   const funil = dashboardMetrics?.funnel
@@ -131,57 +125,8 @@ export function DashboardPage({ onNavigate, metrics }: DashboardPageProps) {
           ))}
         </div>
 
-        {/* Renovação mensal prevista */}
-        <div className="grid grid-cols-1 gap-3 mb-4">
-          <motion.div
-            initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
-            className="rounded-2xl p-6 relative overflow-hidden"
-            style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
-          >
-            <div className="relative flex items-start justify-between mb-5">
-              <div>
-                <p className="text-xs text-slate-500 mb-1">Renovação mensal prevista</p>
-                <p className="text-4xl font-bold text-white" style={{ fontFamily: 'var(--font-display)' }}>
-                  R$ {receitaPrevista.toFixed(0)}
-                </p>
-                <p className="text-xs flex items-center gap-1 mt-1.5" style={{ color: '#22c55e' }}>
-                  <ArrowUpRight className="h-3.5 w-3.5" />
-                  Base mensal ativa, sem testes temporários
-                </p>
-              </div>
-              <button
-                onClick={() => onNavigate('financeiro')}
-                className="text-xs px-3 h-8 rounded-lg font-medium transition-colors"
-                style={{ background: 'rgba(34,197,94,0.12)', border: '1px solid rgba(34,197,94,0.25)', color: '#4ade80' }}
-              >
-                Financeiro
-              </button>
-            </div>
-            <div className="relative flex items-end justify-between gap-3 h-28">
-              {serie.map((s, i) => (
-                <div key={s.label} className="flex-1 flex flex-col items-center justify-end h-full gap-2">
-                  <motion.div
-                    initial={{ height: 0 }}
-                    animate={{ height: `${(s.value / maxSerie) * 100}%` }}
-                    transition={{ delay: 0.3 + i * 0.08, duration: 0.5, ease: 'easeOut' }}
-                    className="w-full rounded-t-lg relative group"
-                    style={{
-                      background: i === 0
-                        ? 'linear-gradient(180deg, #22c55e, rgba(34,197,94,0.3))'
-                        : 'linear-gradient(180deg, rgba(34,197,94,0.5), rgba(34,197,94,0.08))',
-                      minHeight: 6,
-                    }}
-                  >
-                    <span className="absolute -top-5 left-1/2 -translate-x-1/2 text-[10px] font-semibold text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
-                      R$ {s.value.toFixed(0)}
-                    </span>
-                  </motion.div>
-                  <span className="text-[10px] text-slate-500">{s.label}</span>
-                </div>
-              ))}
-            </div>
-          </motion.div>
-        </div>
+        {/* Projeção de renovação */}
+        <RenovacaoProjecao base={renovacaoBase} onNavigate={onNavigate} />
 
         {/* Funil */}
         <motion.div
@@ -221,6 +166,100 @@ export function DashboardPage({ onNavigate, metrics }: DashboardPageProps) {
         </motion.div>
       </div>
     </div>
+  )
+}
+
+// ─── Projeção de renovação baseada na base mensal de clientes ativos ───
+// Regra: Mês = base (100%); demais períodos = base × meses × 0,8 (desconto de 20%).
+// Valor fica oculto e só aparece ao passar o mouse (desktop) ou tocar (celular).
+function RenovacaoProjecao({ base, onNavigate }: { base: number; onNavigate: (p: NavPage) => void }) {
+  const [ativo, setAtivo] = useState<number | null>(null)
+
+  const periodos = [
+    { label: 'Mês',     meses: 1 },
+    { label: '60 dias', meses: 2 },
+    { label: '3 meses', meses: 3 },
+    { label: '6 meses', meses: 6 },
+    { label: '1 ano',   meses: 12 },
+  ]
+  const valorDe = (meses: number) => (meses === 1 ? base : base * meses * 0.8)
+  const maxValor = Math.max(...periodos.map(p => valorDe(p.meses)), 1)
+  const fmt = (v: number) =>
+    'R$ ' + Math.round(v).toLocaleString('pt-BR')
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
+      className="rounded-2xl p-6 relative overflow-hidden mb-4"
+      style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
+    >
+      <div className="relative flex items-start justify-between mb-5">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <TrendingUp className="h-4 w-4" style={{ color: '#22c55e' }} />
+            <p className="text-sm font-semibold text-white">Projeção de renovação</p>
+          </div>
+          <p className="text-xs text-slate-500 flex items-center gap-1">
+            <Eye className="h-3 w-3" />
+            Passe o mouse ou toque em um período para ver o valor
+          </p>
+        </div>
+        <button
+          onClick={() => onNavigate('financeiro')}
+          className="text-xs px-3 h-8 rounded-lg font-medium transition-colors shrink-0"
+          style={{ background: 'rgba(34,197,94,0.12)', border: '1px solid rgba(34,197,94,0.25)', color: '#4ade80' }}
+        >
+          Financeiro
+        </button>
+      </div>
+
+      <div className="relative grid grid-cols-5 gap-2 sm:gap-3 items-end">
+        {periodos.map((p, i) => {
+          const valor = valorDe(p.meses)
+          const revelado = ativo === i
+          const altura = 28 + (valor / maxValor) * 88 // 28px base + até ~116px
+          return (
+            <button
+              key={p.label}
+              type="button"
+              onMouseEnter={() => setAtivo(i)}
+              onMouseLeave={() => setAtivo(prev => (prev === i ? null : prev))}
+              onClick={() => setAtivo(prev => (prev === i ? null : i))}
+              className="flex flex-col items-center justify-end gap-2 group focus:outline-none"
+              aria-label={`${p.label}: ${fmt(valor)}`}
+            >
+              <span
+                className={`text-[10px] sm:text-xs font-bold whitespace-nowrap transition-all duration-200 ${
+                  revelado ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-1'
+                }`}
+                style={{ color: '#4ade80' }}
+              >
+                {fmt(valor)}
+              </span>
+              <div
+                className="w-full rounded-t-lg transition-all duration-200"
+                style={{
+                  height: altura,
+                  background: revelado
+                    ? 'linear-gradient(180deg, #22c55e, rgba(34,197,94,0.35))'
+                    : 'linear-gradient(180deg, rgba(34,197,94,0.45), rgba(34,197,94,0.08))',
+                  border: revelado ? '1px solid rgba(34,197,94,0.6)' : '1px solid transparent',
+                }}
+              >
+                {!revelado && (
+                  <span className="flex items-center justify-center h-full text-xs font-bold text-slate-500">
+                    •••
+                  </span>
+                )}
+              </div>
+              <span className={`text-[10px] sm:text-xs transition-colors ${revelado ? 'text-white' : 'text-slate-500'}`}>
+                {p.label}
+              </span>
+            </button>
+          )
+        })}
+      </div>
+    </motion.div>
   )
 }
 
