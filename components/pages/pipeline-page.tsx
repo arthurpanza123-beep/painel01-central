@@ -12,7 +12,7 @@ import { useToast } from '@/components/ui/toast'
 // Fluxo correto solicitado pelo usuário
 const ETAPAS: { id: EtapaPipeline; label: string; color: string; glow: string }[] = [
   { id: 'novo_lead',    label: 'Lead',           color: '#3b82f6', glow: '59,130,246' },
-  { id: 'contato',      label: 'Baixando app',   color: '#6366f1', glow: '99,102,241' },
+  { id: 'contato',      label: 'Baixando app',   color: '#38bdf8', glow: '56,189,248' },
   { id: 'teste_gerado', label: 'Testando',       color: '#f59e0b', glow: '245,158,11' },
   { id: 'testando',     label: 'Finalizou',      color: '#eab308', glow: '234,179,8' },
   { id: 'pagou',        label: 'Pagou',          color: '#22c55e', glow: '34,197,94' },
@@ -101,7 +101,7 @@ export function PipelinePage() {
                 {/* Cabeçalho coluna */}
                 <div className="flex items-center justify-between mb-3 px-1">
                   <div className="flex items-center gap-2">
-                    <span className="h-2.5 w-2.5 rounded-full" style={{ background: etapa.color, boxShadow: `0 0 8px ${etapa.color}` }} />
+                    <span className="h-2.5 w-2.5 rounded-full" style={{ background: etapa.color }} />
                     <span className="text-xs font-semibold text-slate-300">{etapa.label}</span>
                   </div>
                   <span
@@ -131,7 +131,7 @@ export function PipelinePage() {
                   </AnimatePresence>
                   {cards.length === 0 && (
                     <div className="flex items-center justify-center h-20 text-[11px] text-slate-700">
-                      Vazio
+                      Sem leads
                     </div>
                   )}
                 </div>
