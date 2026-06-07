@@ -3,6 +3,7 @@ import type { Metadata, Viewport } from 'next'
 import { Inter, JetBrains_Mono, Plus_Jakarta_Sans } from 'next/font/google'
 import './globals.css'
 import { ToastProvider } from '@/components/ui/toast'
+import { PerfProvider } from '@/components/perf-provider'
 
 const inter = Inter({
   subsets: ['latin'],
@@ -45,9 +46,11 @@ export default function RootLayout({
   return (
     <html lang="pt-BR" className={`${inter.variable} ${jetbrainsMono.variable} ${plusJakartaSans.variable} bg-background`}>
       <body className="font-sans antialiased">
-        <ToastProvider>
-          {children}
-        </ToastProvider>
+        <PerfProvider>
+          <ToastProvider>
+            {children}
+          </ToastProvider>
+        </PerfProvider>
         {process.env.NODE_ENV === 'production' && <Analytics />}
       </body>
     </html>
