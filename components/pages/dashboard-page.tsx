@@ -45,8 +45,8 @@ export function DashboardPage({ onNavigate, metrics }: DashboardPageProps) {
   const testesAtivos = dashboardMetrics?.active_tests ?? MOCK_TESTES.filter(t => t.status === 'ativo').length
   const operacaoHoje = dashboardMetrics?.leads_in_progress ?? MOCK_PIPELINE.filter(l => l.etapa !== 'ativado' && l.etapa !== 'renovacao').length
   const clientesAtivos = dashboardMetrics?.active_clients ?? MOCK_CLIENTES.filter(c => c.status === 'ativo').length
-  const renovacaoBase = dashboardMetrics?.monthly_renewal_base
-    ?? dashboardMetrics?.monthly_renewal_forecast
+  const renovacaoBase = dashboardMetrics?.monthly_renewal_forecast
+    ?? dashboardMetrics?.monthly_renewal_base
     ?? MOCK_CLIENTES.filter(c => c.status === 'ativo').reduce((acc, c) => acc + (c.valor ?? 0), 0)
   const hojeBR = new Date().toLocaleDateString('pt-BR')
   const ativadosHoje = dashboardMetrics?.activated_today ?? MOCK_CLIENTES.filter(c => c.criadoEm === hojeBR).length
@@ -143,7 +143,7 @@ function RenovacaoProjecao({ base, onNavigate }: { base: number; onNavigate: (p:
     { label: '6 meses', meses: 6 },
     { label: '1 ano', meses: 12 },
   ]
-  const valorDe = (meses: number) => (meses === 1 ? base : base * meses * 0.8)
+  const valorDe = (meses: number) => base * meses
   const maxValor = Math.max(...periodos.map(p => valorDe(p.meses)), 1)
   const fmt = (value: number) => `R$ ${Math.round(value).toLocaleString('pt-BR')}`
 
@@ -161,7 +161,7 @@ function RenovacaoProjecao({ base, onNavigate }: { base: number; onNavigate: (p:
             <TrendingUp className="h-4 w-4" style={{ color: '#22c55e' }} />
             <p className="text-sm font-semibold text-white">Projeção de renovação</p>
           </div>
-          <p className="text-xs text-slate-500">Estimativa por período · toque para destacar</p>
+          <p className="text-xs text-slate-500">Mesma base do Financeiro · toque para destacar</p>
         </div>
         <button
           onClick={() => onNavigate('financeiro')}

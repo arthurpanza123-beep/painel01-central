@@ -29,7 +29,7 @@ export function operationWindows(now = new Date()) {
 }
 
 export function isOperationalNoise(value: unknown): boolean {
-  return /worker|codex|mock|teste e2e|e2e|reject|tempor[aá]rio|temporary|teste segunda tela arthur|teste renovacao arthur|teste ativa[cç][aã]o blessed arthur|teste expire idempotente/i.test(String(value || ''))
+  return /worker|codex|mock|teste e2e|e2e|reject|tempor[aá]rio|temporary|operador final|lead recaptura operacional|real (playsim|blessed|xcloud) \d{6,}|teste segunda tela arthur|teste renovacao arthur|teste ativa[cç][aã]o blessed arthur|teste expire idempotente/i.test(String(value || ''))
 }
 
 export function isoPlusMinutes(minutes: number, now = new Date()): string {

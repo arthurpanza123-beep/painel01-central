@@ -62,6 +62,11 @@ type OperationalSettings = {
   test_duration_minutes: number
 }
 
+type NavigationContext = {
+  test_id?: string
+  client_id?: string
+}
+
 function pageFromSection(section: string | null): NavPage | null {
   if (!section) return null
   if (section === 'tests') return 'testes'
@@ -76,12 +81,16 @@ export default function App() {
   const [settingsBusy, setSettingsBusy] = useState(false)
   const { addToast } = useToast()
 
-  const navigate = (nextPage: NavPage) => {
+  const navigate = (nextPage: NavPage, context: NavigationContext = {}) => {
     setPage(nextPage)
     setMobileMenuOpen(false)
     const url = new URL(window.location.href)
     if (nextPage === 'dashboard') url.searchParams.delete('section')
     else url.searchParams.set('section', nextPage)
+    for (const key of ['test_id', 'client_id'] as const) {
+      url.searchParams.delete(key)
+      if (context[key]) url.searchParams.set(key, context[key])
+    }
     window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`)
   }
 
@@ -93,8 +102,8 @@ export default function App() {
 
   useEffect(() => {
     const onNavigate = (event: Event) => {
-      const detail = (event as CustomEvent<{ page?: NavPage }>).detail
-      if (detail?.page) navigate(detail.page)
+      const detail = (event as CustomEvent<{ page?: NavPage } & NavigationContext>).detail
+      if (detail?.page) navigate(detail.page, { test_id: detail.test_id, client_id: detail.client_id })
     }
     window.addEventListener('centralplay:navigate', onNavigate)
     return () => window.removeEventListener('centralplay:navigate', onNavigate)

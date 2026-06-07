@@ -61,8 +61,11 @@ const PANEL_PROVIDER_LOOKUP: Record<string, string> = {
 export function AtivarClientesPage() {
   const [step, setStep] = useState<Step>('busca')
   const [search, setSearch] = useState('')
+  const [serverSearch, setServerSearch] = useState('')
   const [clientes, setClientes] = useState<Cliente[]>([])
   const [clienteSelecionado, setClienteSelecionado] = useState<Cliente | null>(null)
+  const [selectedTestId, setSelectedTestId] = useState<string | null>(null)
+  const [routeSelectionApplied, setRouteSelectionApplied] = useState(false)
   const [novoCliente, setNovoCliente] = useState({ name: '', phone: '' })
   const [appKey, setAppKey] = useState('xcloud')
   const [panelKey, setPanelKey] = useState('yellow')
@@ -82,7 +85,7 @@ export function AtivarClientesPage() {
     let alive = true
     async function load() {
       try {
-        const res = await fetch('/api/clients', { cache: 'no-store' })
+        const res = await fetch('/api/clients?context=activation', { cache: 'no-store' })
         const payload = await res.json()
         if (!alive) return
         setClientes(Array.isArray(payload.items) ? payload.items : [])
@@ -94,9 +97,31 @@ export function AtivarClientesPage() {
     return () => { alive = false }
   }, [])
 
+  useEffect(() => {
+    const query = search.trim()
+    const controller = new AbortController()
+    const timer = window.setTimeout(async () => {
+      if (query.length === 1) return
+      try {
+        const suffix = query ? `&q=${encodeURIComponent(query)}` : ''
+        const res = await fetch(`/api/clients?context=activation${suffix}`, { cache: 'no-store', signal: controller.signal })
+        const payload = await res.json()
+        setClientes(Array.isArray(payload.items) ? payload.items : [])
+        setServerSearch(query)
+      } catch {
+        if (!controller.signal.aborted) setServerSearch('')
+      }
+    }, 250)
+    return () => {
+      window.clearTimeout(timer)
+      controller.abort()
+    }
+  }, [search])
+
   const clientesFiltrados = useMemo(() => {
     const s = search.toLowerCase().trim()
     if (!s) return []
+    if (serverSearch === search.trim()) return clientes
     return clientes.filter((cliente) =>
       cliente.nome.toLowerCase().includes(s) ||
       cliente.telefone.includes(search) ||
@@ -106,6 +131,7 @@ export function AtivarClientesPage() {
 
   const plano = officialPlan(planKey, screensCount)
   const valorFinal = plano.amountCents / 100
+  const activationTestId = selectedTestId || clienteSelecionado?.activeTestId || null
   const selectedClientName = clienteSelecionado?.nome || novoCliente.name || search
   const selectedClientPhone = clienteSelecionado?.telefone || novoCliente.phone
   const providerLookup = PANEL_PROVIDER_LOOKUP[panelKey] || panelKey
@@ -127,6 +153,7 @@ export function AtivarClientesPage() {
         panel_key: nextPanel,
         screens_count: String(screensCount),
         ...(clienteSelecionado?.id ? { client_id: clienteSelecionado.id } : {}),
+        ...(activationTestId ? { test_id: activationTestId } : {}),
         ...(!clienteSelecionado?.id ? { client: novoCliente.name } : {}),
       })
       const res = await fetch(`/api/activations/recommendation?${params.toString()}`, { cache: 'no-store' })
@@ -145,8 +172,9 @@ export function AtivarClientesPage() {
     }
   }
 
-  function selecionarCliente(cliente: Cliente) {
+  function selecionarCliente(cliente: Cliente, testId: string | null = cliente.activeTestId || null) {
     setClienteSelecionado(cliente)
+    setSelectedTestId(testId)
     setNovoCliente({ name: '', phone: '' })
     setAppKey(appIdFromName(cliente.app) || 'xcloud')
     setPanelKey(panelIdFromName(cliente.servidor) || 'yellow')
@@ -161,8 +189,47 @@ export function AtivarClientesPage() {
     setStep('app_plano')
   }
 
+  useEffect(() => {
+    if (routeSelectionApplied || clientes.length === 0) return
+    const params = new URLSearchParams(window.location.search)
+    const routeTestId = params.get('test_id')
+    const routeClientId = params.get('client_id')
+    if (!routeTestId && !routeClientId) return
+
+    let alive = true
+    async function applyRouteSelection() {
+      let found = clientes.find((cliente) =>
+        (routeClientId && cliente.id === routeClientId) ||
+        (routeTestId && cliente.activeTestId === routeTestId)
+      )
+
+      if (!found && routeTestId) {
+        try {
+          const res = await fetch(`/api/tests?test_id=${encodeURIComponent(routeTestId)}`, { cache: 'no-store' })
+          const payload = await res.json().catch(() => null)
+          const test = Array.isArray(payload?.items) ? payload.items.find((item: { id?: string }) => item.id === routeTestId) : null
+          const clientId = typeof test?.clientId === 'string' ? test.clientId : ''
+          if (clientId) found = clientes.find((cliente) => cliente.id === clientId)
+        } catch {
+          // Mantem a busca manual caso o link profundo nao resolva.
+        }
+      }
+
+      if (!alive) return
+      if (found) {
+        setSearch(found.nome)
+        selecionarCliente(found, routeTestId || found.activeTestId || null)
+      }
+      setRouteSelectionApplied(true)
+    }
+
+    void applyRouteSelection()
+    return () => { alive = false }
+  }, [clientes, routeSelectionApplied])
+
   function criarNovo() {
     setClienteSelecionado(null)
+    setSelectedTestId(null)
     setNovoCliente({ name: search, phone: '' })
     setRecommendation(null)
     setRecommendationAttempted(false)
@@ -220,6 +287,7 @@ export function AtivarClientesPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...(clienteSelecionado?.id ? { client_id: clienteSelecionado.id } : { client: { name: selectedClientName, phone: selectedClientPhone } }),
+          ...(activationTestId ? { test_id: activationTestId } : {}),
           app_id: recommendation?.app_id || undefined,
           panel_id: recommendation?.panel_id || undefined,
           app_key: recommendation?.app_key || appKey,
@@ -269,6 +337,7 @@ export function AtivarClientesPage() {
           context: {
             source: 'painel1',
             client_id: data.activation?.client_id || clienteSelecionado?.id || '',
+            test_id: data.activation?.test_id || activationTestId || '',
             operator_ref: 'painel_web',
           },
         }),
@@ -279,6 +348,7 @@ export function AtivarClientesPage() {
       setStep('busca')
       setSearch('')
       setClienteSelecionado(null)
+      setSelectedTestId(null)
       setNovoCliente({ name: '', phone: '' })
       setRecommendation(null)
       setProviderText('')
@@ -313,7 +383,19 @@ export function AtivarClientesPage() {
                   <button key={cliente.id} onClick={() => selecionarCliente(cliente)} className="w-full flex items-center gap-4 p-4 text-left hover:bg-white/[0.03] transition-colors" style={{ borderBottom: '1px solid var(--border)' }}>
                     <div className="h-10 w-10 rounded-xl flex items-center justify-center text-sm font-bold shrink-0" style={{ background: 'rgba(59,130,246,0.15)', color: '#60a5fa' }}>{cliente.nome.slice(0, 2).toUpperCase()}</div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-white truncate">{cliente.nome}</p>
+                      <div className="flex min-w-0 flex-wrap items-center gap-2">
+                        <p className="text-sm font-semibold text-white truncate">{cliente.nome}</p>
+                        {cliente.activeTestId && (
+                          <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ background: 'rgba(245,158,11,0.12)', color: '#fbbf24', border: '1px solid rgba(245,158,11,0.22)' }}>
+                            teste ativo
+                          </span>
+                        )}
+                        {cliente.rawStatus === 'lead' && (
+                          <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ background: 'rgba(59,130,246,0.12)', color: '#93c5fd', border: '1px solid rgba(59,130,246,0.22)' }}>
+                            lead
+                          </span>
+                        )}
+                      </div>
                       <p className="text-xs text-slate-500">{cliente.telefone} · {cliente.app} · R$ {cliente.valor || 0}</p>
                     </div>
                     <ChevronRight className="h-5 w-5 text-slate-600" />
@@ -338,8 +420,18 @@ export function AtivarClientesPage() {
               <Panel title="Cliente">
                 {clienteSelecionado ? (
                   <div>
-                    <p className="text-sm font-semibold text-white">{clienteSelecionado.nome}</p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-sm font-semibold text-white">{clienteSelecionado.nome}</p>
+                      {activationTestId && (
+                        <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ background: 'rgba(245,158,11,0.12)', color: '#fbbf24', border: '1px solid rgba(245,158,11,0.22)' }}>
+                          teste ativo vinculado
+                        </span>
+                      )}
+                    </div>
                     <p className="text-xs text-slate-500">{clienteSelecionado.telefone}</p>
+                    {activationTestId && (
+                      <p className="mt-2 text-xs text-amber-300">A ativacao vai converter este teste para pago sem ocupar tela antes da confirmacao.</p>
+                    )}
                   </div>
                 ) : (
                   <div className="grid gap-3 sm:grid-cols-2">

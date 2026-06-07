@@ -142,6 +142,7 @@ export async function getTestsData(options: TestsQueryOptions = {}): Promise<Tes
 
       return {
         id: test.id,
+        clientId: test.client_id,
         cliente: client?.name || 'Cliente',
         telefone: maskPhone(client?.phone_e164 || ''),
         app: app?.name || test.provider || 'Aplicativo',

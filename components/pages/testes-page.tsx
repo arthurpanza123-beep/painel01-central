@@ -224,7 +224,7 @@ function TesteCard({
             >
               <Eye className="h-3 w-3" /> Ver detalhes
             </button>
-            {teste.status === 'pago' && (
+            {(isAtivo || teste.status === 'pago') && (
               <button onClick={onAtivar} className="h-7 px-3 rounded-lg text-[11px] font-medium flex items-center gap-1.5 transition-all" style={{ background: 'rgba(34,197,94,0.1)', color: '#4ade80', border: '1px solid rgba(34,197,94,0.2)' }}>
                 <Zap className="h-3 w-3" /> Ativar cliente
               </button>
@@ -531,7 +531,7 @@ export function TestesPage() {
                 key={teste.id}
                 teste={teste}
                 onVerDetalhes={() => addToast('info', `Detalhes: ${teste.usuario} / ${teste.senha}`)}
-                onAtivar={() => { window.dispatchEvent(new CustomEvent('centralplay:navigate', { detail: { page: 'ativar-clientes', test_id: teste.id } })) }}
+                onAtivar={() => { window.dispatchEvent(new CustomEvent('centralplay:navigate', { detail: { page: 'ativar-clientes', test_id: teste.id, client_id: teste.clientId } })) }}
                 onAbrirPainel={() => abrirPainelProvedor(teste)}
 	                onExpirar={() => {
 	                  if (expiringTestId) return

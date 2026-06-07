@@ -19,6 +19,7 @@ export type TipoProblema =
 
 export interface Teste {
   id: string
+  clientId?: string
   cliente: string
   telefone: string
   app: string
@@ -42,6 +43,9 @@ export interface Teste {
 
 export interface Cliente {
   id: string
+  rawStatus?: string
+  activeTestId?: string
+  activeTestStatus?: string
   nome: string
   telefone: string
   app: string

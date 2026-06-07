@@ -21,6 +21,7 @@
 import type { DashboardMetrics } from '@/lib/supabase/types'
 import { operationWindows, isOperationalNoise } from '@/lib/services/operational-window'
 import { getSupabaseServerClient, isSupabaseServerConfigured } from '@/lib/supabase/server'
+import { getFinanceData } from '@/lib/queries/finance'
 import {
   MOCK_TESTES,
   MOCK_CLIENTES,
@@ -118,14 +119,6 @@ function calculateMonthlyRenewalForecast(clients: ClientFinanceRow[], renewals: 
   }, 0)
 }
 
-function calculateActiveClientRenewalBase(clients: ClientFinanceRow[], renewals: RenewalFinanceRow[]) {
-  const latest = latestRenewalsByClient(renewals)
-  return clients.reduce((total, client) => {
-    if (client.status !== 'active' || isTemporaryClient(client)) return total
-    return total + money(latest.get(client.id)?.amount_cents)
-  }, 0)
-}
-
 function yellowBoxOperationalCredits(): number {
   const parsed = Number(process.env.YELLOW_BOX_CREDITS || process.env.BRASIL_YELLOW_CREDITS || 9)
   return Number.isFinite(parsed) ? parsed : 9
@@ -137,7 +130,7 @@ async function getDashboardFromSupabase(): Promise<DashboardMetrics | null> {
 
   try {
     const now = new Date()
-    const { todayStartIso, in30dIso, in60dIso, in90dIso } = operationWindows(now)
+    const { todayStartIso, in30dIso } = operationWindows(now)
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
     const nowIso = now.toISOString()
 
@@ -153,11 +146,10 @@ async function getDashboardFromSupabase(): Promise<DashboardMetrics | null> {
       revenueTodayRes,
       revenueMonthRes,
       forecast30Res,
-      forecast60Res,
-      forecast90Res,
       financeClientsRes,
       financeRenewalsRes,
       creditsRes,
+      financeData,
     ] = await Promise.all([
       db.from('tests').select('id', { count: 'exact', head: true }).gte('created_at', todayStartIso),
       db.from('tests').select('id', { count: 'exact', head: true }).eq('status', 'active').gt('expires_at', nowIso),
@@ -170,8 +162,6 @@ async function getDashboardFromSupabase(): Promise<DashboardMetrics | null> {
       db.from('payments').select('amount_cents').eq('status', 'paid').gte('paid_at', todayStartIso),
       db.from('payments').select('amount_cents').eq('status', 'paid').gte('paid_at', monthStart),
       db.from('renewals').select('amount_cents').not('amount_cents', 'is', null).gte('due_at', nowIso).lte('due_at', in30dIso),
-      db.from('renewals').select('amount_cents').not('amount_cents', 'is', null).gte('due_at', nowIso).lte('due_at', in60dIso),
-      db.from('renewals').select('amount_cents').not('amount_cents', 'is', null).gte('due_at', nowIso).lte('due_at', in90dIso),
       db.from('clients').select('id,name,status'),
       db.from('renewals').select('client_id,plan_key,amount_cents,created_at'),
       db
@@ -179,6 +169,7 @@ async function getDashboardFromSupabase(): Promise<DashboardMetrics | null> {
         .select('id, credits_available, estimated_activations, status, checked_at, panels(name)')
         .order('checked_at', { ascending: false })
         .limit(12),
+      getFinanceData(),
     ])
 
     const generatedToday = getCount(generatedTodayRes)
@@ -190,13 +181,11 @@ async function getDashboardFromSupabase(): Promise<DashboardMetrics | null> {
     const paidPipeline = getCount(paidPipelineRes)
     const activatedToday = getCount(activatedTodayRes)
 
-    if (revenueTodayRes.error || revenueMonthRes.error || forecast30Res.error || forecast60Res.error || forecast90Res.error || financeClientsRes.error || financeRenewalsRes.error || creditsRes.error) {
+    if (revenueTodayRes.error || revenueMonthRes.error || forecast30Res.error || financeClientsRes.error || financeRenewalsRes.error || creditsRes.error) {
       throw new Error(
         revenueTodayRes.error?.message ||
         revenueMonthRes.error?.message ||
         forecast30Res.error?.message ||
-        forecast60Res.error?.message ||
-        forecast90Res.error?.message ||
         financeClientsRes.error?.message ||
         financeRenewalsRes.error?.message ||
         creditsRes.error?.message ||
@@ -206,7 +195,9 @@ async function getDashboardFromSupabase(): Promise<DashboardMetrics | null> {
 
     const financeClients = (financeClientsRes.data || []) as ClientFinanceRow[]
     const financeRenewals = (financeRenewalsRes.data || []) as RenewalFinanceRow[]
-    const activeClients = financeClients.filter((client) => client.status === 'active' && !isTemporaryClient(client)).length
+    const activeClients = financeData.data_source === 'supabase'
+      ? financeData.metrics.clientesAtivos
+      : financeClients.filter((client) => client.status === 'active' && !isTemporaryClient(client)).length
 
     const sumCents = (rows: { amount_cents: number | null }[] | null) =>
       (rows || []).reduce((acc, row) => acc + (row.amount_cents || 0), 0) / 100
@@ -239,15 +230,13 @@ async function getDashboardFromSupabase(): Promise<DashboardMetrics | null> {
       })
     }
 
-    const availableCredits = panelCredits.reduce((acc, row) => acc + row.balance, 0)
-    const monthlyRenewalForecast = calculateMonthlyRenewalForecast(
-      financeClients,
-      financeRenewals
-    )
-    const monthlyRenewalBase = calculateActiveClientRenewalBase(
-      financeClients,
-      financeRenewals
-    )
+    const availableCredits = financeData.data_source === 'supabase'
+      ? financeData.metrics.creditosDisponiveis
+      : panelCredits.reduce((acc, row) => acc + row.balance, 0)
+    const monthlyRenewalForecast = financeData.data_source === 'supabase'
+      ? financeData.metrics.renovacaoMensalPrevista
+      : calculateMonthlyRenewalForecast(financeClients, financeRenewals)
+    const monthlyRenewalBase = monthlyRenewalForecast
 
     return {
       active_tests: activeTests,
@@ -261,9 +250,9 @@ async function getDashboardFromSupabase(): Promise<DashboardMetrics | null> {
       monthly_renewal_base: monthlyRenewalBase,
       monthly_renewal_forecast: monthlyRenewalForecast,
       revenue_due_30d: sumCents(forecast30Res.data),
-      revenue_forecast_30d: sumCents(forecast30Res.data),
-      revenue_forecast_60d: sumCents(forecast60Res.data),
-      revenue_forecast_90d: sumCents(forecast90Res.data),
+      revenue_forecast_30d: monthlyRenewalForecast,
+      revenue_forecast_60d: monthlyRenewalForecast * 2,
+      revenue_forecast_90d: monthlyRenewalForecast * 3,
       funnel: [
         { stage: 'novo_lead', label: 'Lead', count: leads, color: '#3b82f6' },
         { stage: 'contato', label: 'Baixando app', count: 0, color: '#38bdf8' },
