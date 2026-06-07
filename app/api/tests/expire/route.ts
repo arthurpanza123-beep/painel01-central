@@ -400,6 +400,7 @@ export async function POST(req: NextRequest) {
         .eq('id', test.id)
 
       if (updateError) throw new Error(updateError.message)
+      claimed = true
     }
 
     if (!claimed) {
@@ -661,6 +662,8 @@ export async function POST(req: NextRequest) {
               ? 'falhou'
               : 'pendente'
         : 'nao se aplica'
+      const manualCloseRequired = !noticeXcloudState.required
+      const noticeProviderUrl = manualCloseRequired ? providerUrl : ''
 
 	    operatorNoticeResult = await dispatchOperatorExpiredNotice(db, {
 	      test,
@@ -671,9 +674,9 @@ export async function POST(req: NextRequest) {
       username,
       expiredAt,
       operatorRef,
-      providerUrl,
+      providerUrl: noticeProviderUrl,
       xcloudRemoveStatus,
-      manualCloseRequired: !noticeXcloudState.required,
+      manualCloseRequired,
 	      source: body.source === 'auto' ? 'auto' : 'manual',
 	    }).catch((error) => ({ ok: false, error: error instanceof Error ? error.message : String(error) }))
 

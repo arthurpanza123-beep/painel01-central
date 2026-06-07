@@ -5,19 +5,6 @@ import { effectiveTestExpiresAt, readOperationalSettings } from '@/lib/services/
 
 type JsonRecord = Record<string, unknown>
 
-function safeMetadata(metadata: JsonRecord | null | undefined): JsonRecord {
-  return metadata && typeof metadata === 'object' && !Array.isArray(metadata) ? metadata : {}
-}
-
-function metadataString(metadata: JsonRecord, key: string): string {
-  const value = metadata[key]
-  return typeof value === 'string' ? value : ''
-}
-
-function isOperatorNoticeSent(metadata: JsonRecord): boolean {
-  return Boolean(metadataString(metadata, 'operator_expired_notice_sent_at')) || metadataString(metadata, 'operator_expired_notice_status') === 'sent'
-}
-
 function isDue(row: {
   activated_at: string | null
   requested_at: string | null
@@ -56,7 +43,6 @@ export async function POST(req: NextRequest) {
   const nowMs = Date.now()
   const candidates = (data || [])
     .filter((row) => isDue(row as { activated_at: string | null; requested_at: string | null; created_at: string | null; expires_at: string | null; legacy_metadata?: JsonRecord | null }, nowMs, settings))
-    .filter((row) => !isOperatorNoticeSent(safeMetadata((row as { legacy_metadata?: JsonRecord | null }).legacy_metadata)))
     .slice(0, limit)
 
   if (body?.dryRun) {

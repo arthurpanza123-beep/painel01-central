@@ -7,6 +7,7 @@ import { CheckCircle, ChevronRight, Search, UserPlus, Users, Zap } from 'lucide-
 import { useToast } from '@/components/ui/toast'
 import { getProviderPanelUrl, listCompatibleApps } from '@/lib/config/provider-catalog'
 import type { Cliente } from '@/lib/mock-data'
+import { OFFICIAL_PLANS, officialPlan, normalizeScreensCount, type ScreensCount } from '@/lib/services/official-plans'
 
 type Step = 'busca' | 'app_plano' | 'confirmar'
 type Recommendation = {
@@ -55,13 +56,6 @@ const PANEL_PROVIDER_LOOKUP: Record<string, string> = {
   areaplay: 'AreaPlay / Sigma',
 }
 
-const PLANOS = [
-  { id: 'mensal', label: 'Mensal', valor: 20 },
-  { id: 'trimestral', label: 'Trimestral', valor: 50 },
-  { id: 'semestral', label: 'Semestral', valor: 90 },
-  { id: 'anual', label: 'Anual', valor: 150 },
-]
-
 export function AtivarClientesPage() {
   const [step, setStep] = useState<Step>('busca')
   const [search, setSearch] = useState('')
@@ -71,6 +65,7 @@ export function AtivarClientesPage() {
   const [appKey, setAppKey] = useState('xcloud')
   const [panelKey, setPanelKey] = useState('yellow')
   const [planKey, setPlanKey] = useState('mensal')
+  const [screensCount, setScreensCount] = useState<ScreensCount>(1)
   const [recommendation, setRecommendation] = useState<Recommendation | null>(null)
   const [recommendationAttempted, setRecommendationAttempted] = useState(false)
   const [recommendationError, setRecommendationError] = useState('')
@@ -106,8 +101,8 @@ export function AtivarClientesPage() {
     )
   }, [clientes, search])
 
-  const plano = PLANOS.find((item) => item.id === planKey) || PLANOS[0]
-  const valorFinal = clienteSelecionado && clienteSelecionado.valor > 0 ? clienteSelecionado.valor : plano.valor
+  const plano = officialPlan(planKey, screensCount)
+  const valorFinal = plano.amountCents / 100
   const selectedClientName = clienteSelecionado?.nome || novoCliente.name || search
   const selectedClientPhone = clienteSelecionado?.telefone || novoCliente.phone
   const providerLookup = PANEL_PROVIDER_LOOKUP[panelKey] || panelKey
@@ -126,6 +121,7 @@ export function AtivarClientesPage() {
       const params = new URLSearchParams({
         app_key: nextApp,
         panel_key: nextPanel,
+        screens_count: String(screensCount),
         ...(clienteSelecionado?.id ? { client_id: clienteSelecionado.id } : {}),
         ...(!clienteSelecionado?.id ? { client: novoCliente.name } : {}),
       })
@@ -151,6 +147,7 @@ export function AtivarClientesPage() {
     setAppKey(appIdFromName(cliente.app) || 'xcloud')
     setPanelKey(panelIdFromName(cliente.servidor) || 'yellow')
     setPlanKey(planIdFromName(cliente.plano) || 'mensal')
+    setScreensCount(normalizeScreensCount(cliente.telas))
     setRecommendation(null)
     setRecommendationAttempted(false)
     setRecommendationError('')
@@ -212,6 +209,7 @@ export function AtivarClientesPage() {
           app_key: recommendation?.app_key || appKey,
           panel_key: recommendation?.panel_key || panelKey,
           plan_key: planKey,
+          screens_count: screensCount,
           amount: valorFinal,
           account_id: recommendation?.account_id || undefined,
           slot_id: recommendation?.slot_id || undefined,
@@ -232,7 +230,7 @@ export function AtivarClientesPage() {
           activation: {
             app: APPS.find((item) => item.id === appKey)?.label || appKey,
             panel: recommendation?.panel_name || PAINEIS.find((item) => item.id === panelKey)?.label || panelKey,
-            plan: plano.label,
+            plan: plano.displayLabel,
             amount: `R$ ${valorFinal.toFixed(2)}`,
             dueAt: data.activation?.due_at || '',
           },
@@ -335,12 +333,24 @@ export function AtivarClientesPage() {
                   )}
                 </div>
               </Panel>
-              <Picker title="Plano" items={PLANOS.map(p => ({ id: p.id, label: `${p.label} · R$ ${p.valor}`, color: '#22c55e' }))} value={planKey} onChange={setPlanKey} />
-              {clienteSelecionado && clienteSelecionado.valor > 0 && clienteSelecionado.valor !== plano.valor && (
-                <div className="rounded-xl p-3 text-xs text-amber-200" style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)' }}>
-                  Valor antigo preservado: R$ {clienteSelecionado.valor}. Plano oficial selecionado: R$ {plano.valor}.
-                </div>
-              )}
+              <Picker
+                title="Telas"
+                items={[
+                  { id: '1', label: '1 tela', color: '#14b8a6' },
+                  { id: '2', label: '2 telas', color: '#22c55e' },
+                ]}
+                value={String(screensCount)}
+                onChange={(value) => {
+                  setScreensCount(normalizeScreensCount(value))
+                  setRecommendation(null)
+                  setRecommendationAttempted(false)
+                  setSlotConfirmed(false)
+                }}
+              />
+              <Picker title="Plano" items={OFFICIAL_PLANS.map(p => {
+                const selected = officialPlan(p.key, screensCount)
+                return { id: p.key, label: `${selected.displayLabel} · R$ ${(selected.amountCents / 100).toFixed(0)}`, color: '#22c55e' }
+              })} value={planKey} onChange={(value) => { setPlanKey(value); setRecommendation(null); setSlotConfirmed(false) }} />
               <button onClick={confirmar} className="w-full h-12 rounded-xl text-sm font-semibold text-white" style={{ background: '#2563eb' }}>Continuar</button>
             </motion.div>
           )}
@@ -352,7 +362,8 @@ export function AtivarClientesPage() {
                   <Row label="Cliente" value={selectedClientName} />
                   <Row label="App" value={APPS.find(item => item.id === appKey)?.label || appKey} />
                   <Row label="Painel" value={PAINEIS.find(item => item.id === panelKey)?.label || panelKey} />
-                  <Row label="Plano" value={plano.label} />
+                  <Row label="Plano" value={plano.displayLabel} />
+                  <Row label="Telas" value={`${screensCount}`} />
                   <Row label="Valor" value={`R$ ${valorFinal}`} />
                 </div>
               </Panel>
@@ -371,6 +382,9 @@ export function AtivarClientesPage() {
                       {recommendation.recommended ? 'Tela livre encontrada' : 'Sem tela livre compativel'}
                     </p>
                     <p className="text-xs text-slate-500">{recommendation.reason}</p>
+                    {screensCount === 2 && recommendation.recommended && (
+                      <p className="text-xs text-emerald-300">A recomendacao foi filtrada para duas telas livres na mesma conta.</p>
+                    )}
                     {recommendation.recommended && (
                       <div className="space-y-3">
                         <p className="text-xs text-emerald-300">Existe uma tela livre em {recommendation.account_label}: {recommendation.slot_label}.</p>
@@ -446,7 +460,7 @@ function panelIdFromName(value: string) {
 
 function planIdFromName(value: string) {
   const normalized = value.toLowerCase()
-  return PLANOS.find((plan) => normalized.includes(plan.id) || normalized.includes(plan.label.toLowerCase()))?.id
+  return OFFICIAL_PLANS.find((plan) => normalized.includes(plan.key) || normalized.includes(plan.label.toLowerCase()))?.key
 }
 
 function Panel({ title, children }: { title: string; children: React.ReactNode }) {

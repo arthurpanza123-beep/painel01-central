@@ -47,6 +47,7 @@ export interface Cliente {
   app: string
   servidor: string
   plano: string
+  telas?: number
   valor: number
   vencimento: string
   usuario: string

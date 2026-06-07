@@ -15,20 +15,18 @@ import { StatusBadge } from '@/components/shared/status-badge'
 import { ActionMenu, type ActionItem } from '@/components/shared/action-menu'
 import { ClientDrawer } from '@/components/shared/client-drawer'
 import { useToast } from '@/components/ui/toast'
-
-const PLAN_OPTIONS = [
-  { key: 'mensal', label: 'Mensal', months: 1 },
-  { key: 'trimestral', label: 'Trimestral', months: 3 },
-  { key: 'semestral', label: 'Semestral', months: 6 },
-  { key: 'anual', label: 'Anual', months: 12 },
-]
+import {
+  OFFICIAL_PLANS,
+  formatCurrencyBRLFromCents,
+  normalizePlanKey,
+  normalizeScreensCount,
+  officialPlan,
+  secondScreenDeltaCents,
+  type ScreensCount,
+} from '@/lib/services/official-plans'
 
 function normalizePlan(value: string) {
-  const key = value
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-  return PLAN_OPTIONS.find((plan) => key.includes(plan.key))?.key || 'mensal'
+  return normalizePlanKey(value)
 }
 
 function parseBrDate(value: string) {
@@ -125,6 +123,7 @@ function ClienteCard({
         <Info icon={Package} label="App" value={cliente.app} />
         <Info icon={Server} label="Servidor" value={cliente.servidor} />
         <Info icon={DollarSign} label="Plano" value={`${cliente.plano} · R$ ${cliente.valor.toFixed(0)}`} />
+        <Info icon={Tv2} label="Telas" value={`${normalizeScreensCount(cliente.telas || (cliente.plano.includes('2') ? 2 : 1))}`} />
         <Info icon={Calendar} label="Vencimento" value={cliente.vencimento} />
       </div>
 
@@ -146,15 +145,16 @@ function RenovarModal({
   cliente: Cliente
   busy: boolean
   onClose: () => void
-  onConfirm: (payload: { plan: string; amountCents: number; dueAt: string; note: string }) => void
+  onConfirm: (payload: { plan: string; screensCount: ScreensCount; amountCents: number; dueAt: string; note: string }) => void
 }) {
   const initialPlan = normalizePlan(cliente.plano)
   const [plan, setPlan] = useState(initialPlan)
-  const [amount, setAmount] = useState(String(cliente.valor || 20).replace('.', ','))
+  const [screensCount, setScreensCount] = useState<ScreensCount>(normalizeScreensCount(cliente.telas || (cliente.plano.includes('2') ? 2 : 1)))
+  const [amount, setAmount] = useState(String(cliente.valor || officialPlan(initialPlan, screensCount).amountCents / 100).replace('.', ','))
   const [note, setNote] = useState('')
 
   const predictedDueAt = useMemo(() => {
-    const option = PLAN_OPTIONS.find((item) => item.key === plan) || PLAN_OPTIONS[0]
+    const option = OFFICIAL_PLANS.find((item) => item.key === plan) || OFFICIAL_PLANS[0]
     return toInputDate(addMonths(parseBrDate(cliente.vencimento), option.months))
   }, [cliente.vencimento, plan])
 
@@ -201,14 +201,36 @@ function RenovarModal({
             <span className="text-[10px] text-slate-500 uppercase tracking-wider">Plano</span>
             <select
               value={plan}
-              onChange={(event) => setPlan(event.target.value)}
+              onChange={(event) => {
+                const nextPlan = normalizePlan(event.target.value)
+                setPlan(nextPlan)
+                setAmount(String((officialPlan(nextPlan, screensCount).amountCents / 100).toFixed(2)).replace('.', ','))
+              }}
               disabled={busy}
               className="mt-2 w-full h-11 rounded-xl px-3 text-sm text-white outline-none disabled:opacity-60"
               style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)' }}
             >
-              {PLAN_OPTIONS.map((option) => (
+              {OFFICIAL_PLANS.map((option) => (
                 <option key={option.key} value={option.key}>{option.label}</option>
               ))}
+            </select>
+          </label>
+
+          <label className="block">
+            <span className="text-[10px] text-slate-500 uppercase tracking-wider">Telas</span>
+            <select
+              value={String(screensCount)}
+              onChange={(event) => {
+                const nextScreens = normalizeScreensCount(event.target.value)
+                setScreensCount(nextScreens)
+                setAmount(String((officialPlan(plan, nextScreens).amountCents / 100).toFixed(2)).replace('.', ','))
+              }}
+              disabled={busy}
+              className="mt-2 w-full h-11 rounded-xl px-3 text-sm text-white outline-none disabled:opacity-60"
+              style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)' }}
+            >
+              <option value="1">1 tela</option>
+              <option value="2">2 telas</option>
             </select>
           </label>
 
@@ -251,6 +273,7 @@ function RenovarModal({
           <button
             onClick={() => onConfirm({
               plan,
+              screensCount,
               amountCents: Math.round(amountNumber * 100),
               dueAt: predictedDueAt,
               note,
@@ -268,6 +291,107 @@ function RenovarModal({
   )
 }
 
+function SegundaTelaModal({
+  cliente,
+  busy,
+  onClose,
+  onConfirm,
+}: {
+  cliente: Cliente
+  busy: boolean
+  onClose: () => void
+  onConfirm: (payload: { plan: string; additionalCents: number; note: string }) => void
+}) {
+  const initialPlan = normalizePlan(cliente.plano)
+  const [plan, setPlan] = useState(initialPlan)
+  const [amount, setAmount] = useState(String((secondScreenDeltaCents(initialPlan) / 100).toFixed(2)).replace('.', ','))
+  const [note, setNote] = useState('')
+  const amountNumber = Number(amount.replace(',', '.'))
+  const canSubmit = Number.isFinite(amountNumber) && amountNumber >= 0 && !busy
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center px-4" style={{ background: 'rgba(5,7,12,0.72)' }}>
+      <motion.div
+        initial={{ opacity: 0, y: 16, scale: 0.98 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        className="w-full max-w-md rounded-2xl overflow-hidden"
+        style={{ background: 'var(--background)', border: '1px solid var(--border)' }}
+      >
+        <div className="flex items-start justify-between gap-4 p-5" style={{ borderBottom: '1px solid var(--border)' }}>
+          <div className="min-w-0">
+            <p className="text-[10px] text-slate-500 uppercase tracking-widest">Segunda tela</p>
+            <h2 className="mt-1 text-lg font-semibold text-white truncate">{cliente.nome}</h2>
+            <p className="text-xs text-slate-500 truncate">{cliente.app} · {cliente.servidor}</p>
+          </div>
+          <button
+            onClick={onClose}
+            disabled={busy}
+            className="h-9 w-9 rounded-lg flex items-center justify-center text-slate-500 disabled:opacity-50"
+            style={{ background: 'rgba(255,255,255,0.04)' }}
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="p-5 space-y-4">
+          <label className="block">
+            <span className="text-[10px] text-slate-500 uppercase tracking-wider">Plano atual</span>
+            <select
+              value={plan}
+              onChange={(event) => {
+                const nextPlan = normalizePlan(event.target.value)
+                setPlan(nextPlan)
+                setAmount(String((secondScreenDeltaCents(nextPlan) / 100).toFixed(2)).replace('.', ','))
+              }}
+              disabled={busy}
+              className="mt-2 w-full h-11 rounded-xl px-3 text-sm text-white outline-none disabled:opacity-60"
+              style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)' }}
+            >
+              {OFFICIAL_PLANS.map((option) => (
+                <option key={option.key} value={option.key}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="block">
+            <span className="text-[10px] text-slate-500 uppercase tracking-wider">Valor adicional</span>
+            <input
+              value={amount}
+              onChange={(event) => setAmount(event.target.value)}
+              disabled={busy}
+              inputMode="decimal"
+              className="mt-2 w-full h-11 rounded-xl px-3 text-sm text-white outline-none disabled:opacity-60"
+              style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)' }}
+            />
+          </label>
+          <label className="block">
+            <span className="text-[10px] text-slate-500 uppercase tracking-wider">Observacao</span>
+            <input
+              value={note}
+              onChange={(event) => setNote(event.target.value)}
+              disabled={busy}
+              placeholder="Opcional"
+              className="mt-2 w-full h-11 rounded-xl px-3 text-sm text-white placeholder:text-slate-600 outline-none disabled:opacity-60"
+              style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)' }}
+            />
+          </label>
+          <div className="rounded-xl p-3 text-xs text-slate-400" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)' }}>
+            O cliente ficará como {officialPlan(plan, 2).displayLabel} · {formatCurrencyBRLFromCents(officialPlan(plan, 2).amountCents)}. O adicional oficial deste plano é {formatCurrencyBRLFromCents(secondScreenDeltaCents(plan))}.
+          </div>
+          <button
+            onClick={() => onConfirm({ plan, additionalCents: Math.round(amountNumber * 100), note })}
+            disabled={!canSubmit}
+            className="w-full h-11 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 disabled:opacity-60"
+            style={{ background: 'rgba(245,158,11,0.16)', color: '#fbbf24', border: '1px solid rgba(245,158,11,0.28)' }}
+          >
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Tv2 className="h-4 w-4" />}
+            {busy ? 'Atualizando...' : 'Ativar segunda tela'}
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  )
+}
+
 // ——— Page ———
 export function ClientesPage() {
   const [search, setSearch] = useState('')
@@ -275,6 +399,8 @@ export function ClientesPage() {
   const [selecionado, setSelecionado] = useState<Cliente | null>(null)
   const [renovando, setRenovando] = useState<Cliente | null>(null)
   const [renovandoId, setRenovandoId] = useState<string | null>(null)
+  const [segundaTela, setSegundaTela] = useState<Cliente | null>(null)
+  const [segundaTelaId, setSegundaTelaId] = useState<string | null>(null)
   const [clientes, setClientes] = useState<Cliente[]>(MOCK_CLIENTES)
   const [dataSource, setDataSource] = useState<'mock' | 'supabase'>('mock')
   const { addToast } = useToast()
@@ -300,7 +426,7 @@ export function ClientesPage() {
     return () => { alive = false }
   }, [loadClientes])
 
-  async function confirmarRenovacao(payload: { plan: string; amountCents: number; dueAt: string; note: string }) {
+  async function confirmarRenovacao(payload: { plan: string; screensCount: ScreensCount; amountCents: number; dueAt: string; note: string }) {
     if (!renovando || renovandoId) return
 
     const idempotencyKey = `renewal:${renovando.id}:${Date.now()}`
@@ -312,6 +438,7 @@ export function ClientesPage() {
         body: JSON.stringify({
           client_id: renovando.id,
           plan: payload.plan,
+          screens_count: payload.screensCount,
           amount_cents: payload.amountCents,
           due_at: payload.dueAt,
           note: payload.note || undefined,
@@ -339,6 +466,42 @@ export function ClientesPage() {
     }
   }
 
+  async function confirmarSegundaTela(payload: { plan: string; additionalCents: number; note: string }) {
+    if (!segundaTela || segundaTelaId) return
+
+    const plan = normalizePlan(payload.plan)
+    setSegundaTelaId(segundaTela.id)
+    try {
+      const fullPlan = officialPlan(plan, 2)
+      const response = await fetch(`/api/clients/${segundaTela.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: segundaTela.nome,
+          phone: segundaTela.telefone,
+          status: 'active',
+          app: segundaTela.app,
+          panel: segundaTela.servidor,
+          plan_key: plan,
+          screens_count: 2,
+          amount_cents: fullPlan.amountCents,
+          second_screen_amount_cents: payload.additionalCents,
+          notes: payload.note || `Ativacao de segunda tela: ${formatCurrencyBRLFromCents(payload.additionalCents)}`,
+        }),
+      })
+      const result = await response.json().catch(() => ({}))
+      if (!response.ok || result?.success === false) throw new Error(result?.error || 'Falha ao ativar segunda tela')
+      await loadClientes()
+      setSegundaTela(null)
+      addToast('success', result?.warnings?.length ? 'Cliente atualizado para 2 telas com aviso operacional' : 'Cliente atualizado para 2 telas')
+      if (result?.warnings?.length) result.warnings.slice(0, 2).forEach((warning: string) => addToast('info', warning))
+    } catch (error) {
+      addToast('error', error instanceof Error ? error.message : 'Falha ao ativar segunda tela')
+    } finally {
+      setSegundaTelaId(null)
+    }
+  }
+
   const filtrados = clientes.filter((c) => {
     const s = search.toLowerCase()
     const matchSearch =
@@ -361,10 +524,11 @@ export function ClientesPage() {
     }, color: '#60a5fa' },
     { label: 'Playlist / Credenciais', icon: Key, onClick: () => setSelecionado(c), color: '#14b8a6' },
     { label: 'Ativar segunda tela', icon: Tv2, onClick: () => {
-      if (c.usuario) navigator.clipboard.writeText(c.usuario)
-      const params = new URLSearchParams({ source: 'painel1', flow: 'second_screen', client_id: c.id, client_name: c.nome, app: c.app, panel: c.servidor })
-      window.open(`https://painel2.centralplayplus.com.br?${params.toString()}`, '_blank')
-      addToast('info', 'Usuario copiado e contexto enviado para Painel 2')
+      if (normalizeScreensCount(c.telas || (c.plano.includes('2') ? 2 : 1)) >= 2) {
+        addToast('info', 'Cliente ja esta marcado com 2 telas')
+        return
+      }
+      setSegundaTela(c)
     }, color: '#f59e0b' },
     { label: 'Codex IA', icon: Sparkles, onClick: () => {
       navigator.clipboard.writeText(`Cliente: ${c.nome}\nTelefone: ${c.telefone}\nApp: ${c.app}\nServidor: ${c.servidor}\nPlano: ${c.plano}\nVencimento: ${c.vencimento}\n\nProblema/Pergunta:`)
@@ -468,6 +632,16 @@ export function ClientesPage() {
             if (!renovandoId) setRenovando(null)
           }}
           onConfirm={confirmarRenovacao}
+        />
+      )}
+      {segundaTela && (
+        <SegundaTelaModal
+          cliente={segundaTela}
+          busy={segundaTelaId === segundaTela.id}
+          onClose={() => {
+            if (!segundaTelaId) setSegundaTela(null)
+          }}
+          onConfirm={confirmarSegundaTela}
         />
       )}
     </>

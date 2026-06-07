@@ -21,6 +21,7 @@ export async function GET(req: NextRequest) {
       account_id: url.searchParams.get('account_id') || undefined,
       slot_id: url.searchParams.get('slot_id') || undefined,
       slot_number: num(url.searchParams.get('slot_number')),
+      screens_count: num(url.searchParams.get('screens_count')),
     })
     return NextResponse.json(result)
   } catch (error) {

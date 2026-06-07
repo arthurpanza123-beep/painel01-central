@@ -10,6 +10,14 @@ import {
 import type { Cliente } from '@/lib/mock-data'
 import { StatusBadge } from './status-badge'
 import { useToast } from '@/components/ui/toast'
+import {
+  OFFICIAL_PLANS,
+  formatCurrencyBRLFromCents,
+  normalizePlanKey,
+  normalizeScreensCount,
+  officialPlan,
+  type ScreensCount,
+} from '@/lib/services/official-plans'
 
 type CatalogAppCredential = {
   app: string
@@ -30,18 +38,46 @@ type CatalogAppCredential = {
 
 type ClientCredentialsPayload = {
   success: boolean
+  client?: {
+    id: string
+    name?: string | null
+    phone_e164?: string | null
+    status?: string | null
+    legacy_metadata?: Record<string, unknown> | null
+  }
   provider: { key: string; name: string; panelUrl: string } | null
   account: {
+    id?: string
     username?: string
     password?: string
     host?: string
     m3u?: string
     hls?: string
     hasSlot?: boolean
+    expiresAt?: string | null
   } | null
+  selectedApp?: { key: string; name: string } | null
+  plan?: { key?: string | null; amountCents?: number | null; dueAt?: string | null; status?: string | null } | null
   apps: CatalogAppCredential[]
   warnings?: string[]
   error?: string
+}
+
+type ClientEditForm = {
+  name: string
+  phone: string
+  status: string
+  app: string
+  panel: string
+  planKey: string
+  screensCount: ScreensCount
+  amount: string
+  dueAt: string
+  username: string
+  password: string
+  host: string
+  providerCode: string
+  notes: string
 }
 
 type AssistantMessage = {
@@ -75,6 +111,24 @@ function Field({ icon: Icon, label, value }: { icon: typeof User; label: string;
   )
 }
 
+function toInputDate(value?: string | null): string {
+  if (!value) return ''
+  const date = new Date(value)
+  if (!Number.isNaN(date.getTime())) return date.toISOString().slice(0, 10)
+  const br = value.match(/^(\d{2})\/(\d{2})\/(\d{4})/)
+  return br ? `${br[3]}-${br[2]}-${br[1]}` : ''
+}
+
+function amountTextFromCents(value?: number | null, fallback = 0): string {
+  const amount = Number(value || fallback || 0) / 100
+  return amount > 0 ? amount.toFixed(2).replace('.', ',') : ''
+}
+
+function metadataString(metadata: Record<string, unknown> | null | undefined, key: string): string {
+  const value = metadata && typeof metadata === 'object' && !Array.isArray(metadata) ? metadata[key] : null
+  return typeof value === 'string' ? value : ''
+}
+
 export function ClientDrawer({
   cliente,
   onClose,
@@ -93,6 +147,9 @@ export function ClientDrawer({
   const [assistantData, setAssistantData] = useState<AssistantPayload | null>(null)
   const [assistantInput, setAssistantInput] = useState('')
   const [assistantLoading, setAssistantLoading] = useState(false)
+  const [editOpen, setEditOpen] = useState(false)
+  const [editForm, setEditForm] = useState<ClientEditForm | null>(null)
+  const [savingEdit, setSavingEdit] = useState(false)
 
   useEffect(() => {
     let alive = true
@@ -140,6 +197,78 @@ export function ClientDrawer({
     }
     navigator.clipboard.writeText(text)
     addToast('success', `${label} copiado`)
+  }
+
+  function buildEditForm(): ClientEditForm {
+    const clientMetadata = details?.client?.legacy_metadata || {}
+    const planKey = normalizePlanKey(details?.plan?.key || cliente?.plano || metadataString(clientMetadata, 'plan_key'))
+    const screensCount = normalizeScreensCount(
+      (clientMetadata.screens_count as number | string | undefined) ||
+      (cliente?.telas as number | undefined) ||
+      (cliente?.plano?.includes('2') ? 2 : 1)
+    )
+    const fallbackPlan = officialPlan(planKey, screensCount)
+    return {
+      name: details?.client?.name || cliente?.nome || '',
+      phone: details?.client?.phone_e164 || cliente?.telefone || '',
+      status: details?.client?.status || cliente?.status || 'active',
+      app: details?.selectedApp?.name || cliente?.app || metadataString(clientMetadata, 'app_label'),
+      panel: details?.provider?.name || cliente?.servidor || metadataString(clientMetadata, 'panel_label'),
+      planKey,
+      screensCount,
+      amount: amountTextFromCents(details?.plan?.amountCents, fallbackPlan.amountCents),
+      dueAt: toInputDate(details?.plan?.dueAt || details?.account?.expiresAt || cliente?.vencimento),
+      username: details?.account?.username || cliente?.usuario || '',
+      password: details?.account?.password || '',
+      host: details?.account?.host || metadataString(clientMetadata, 'host') || metadataString(clientMetadata, 'dns'),
+      providerCode: details?.apps.find((app) => app.providerCode)?.providerCode || metadataString(clientMetadata, 'provider_code'),
+      notes: metadataString(clientMetadata, 'operational_notes') || metadataString(clientMetadata, 'notes'),
+    }
+  }
+
+  function openEditModal() {
+    setEditForm(buildEditForm())
+    setEditOpen(true)
+  }
+
+  async function saveEditForm(payload: ClientEditForm) {
+    if (!cliente?.id || savingEdit) return
+    setSavingEdit(true)
+    try {
+      const amount = Number(payload.amount.replace(',', '.'))
+      const res = await fetch(`/api/clients/${cliente.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: payload.name,
+          phone: payload.phone,
+          status: payload.status,
+          app: payload.app,
+          panel: payload.panel,
+          plan_key: payload.planKey,
+          screens_count: payload.screensCount,
+          amount_cents: Number.isFinite(amount) ? Math.round(amount * 100) : undefined,
+          due_at: payload.dueAt,
+          username: payload.username,
+          password: payload.password,
+          host: payload.host,
+          provider_code: payload.providerCode,
+          notes: payload.notes,
+        }),
+      })
+      const data = await res.json().catch(() => null)
+      if (!res.ok || !data?.success) throw new Error(data?.error || `HTTP ${res.status}`)
+      setEditOpen(false)
+      addToast('success', data.warnings?.length ? 'Cliente atualizado com avisos operacionais' : 'Cliente atualizado')
+      if (data.warnings?.length) data.warnings.slice(0, 2).forEach((warning: string) => addToast('info', warning))
+      const refreshed = await fetch(`/api/clients/${cliente.id}/credentials`, { cache: 'no-store' })
+      const refreshedPayload = await refreshed.json().catch(() => null) as ClientCredentialsPayload | null
+      if (refreshed.ok && refreshedPayload?.success) setDetails(refreshedPayload)
+    } catch (err) {
+      addToast('error', err instanceof Error ? err.message : 'Falha ao salvar cliente')
+    } finally {
+      setSavingEdit(false)
+    }
   }
 
   function readyMessage(app?: CatalogAppCredential) {
@@ -389,6 +518,9 @@ export function ClientDrawer({
 
             {/* Acoes fixas */}
             <div className="sticky bottom-0 p-4 flex gap-2" style={{ background: 'var(--background)', borderTop: '1px solid var(--border)' }}>
+              <button onClick={openEditModal} className="h-10 rounded-xl px-3 text-sm font-medium flex items-center justify-center gap-2" style={{ background: 'rgba(148,163,184,0.1)', color: '#cbd5e1', border: '1px solid rgba(148,163,184,0.2)' }}>
+                <Save className="h-4 w-4" /> Editar
+              </button>
               <button onClick={() => setAssistantOpen(true)} className="h-10 rounded-xl px-3 text-sm font-medium flex items-center justify-center gap-2" style={{ background: 'rgba(20,184,166,0.12)', color: '#2dd4bf', border: '1px solid rgba(20,184,166,0.25)' }}>
                 <Bot className="h-4 w-4" /> Codex IA
               </button>
@@ -396,6 +528,17 @@ export function ClientDrawer({
                 <RefreshCw className="h-4 w-4" /> Renovar
               </button>
             </div>
+            {editOpen && editForm && (
+              <ClientEditModal
+                form={editForm}
+                saving={savingEdit}
+                onChange={setEditForm}
+                onClose={() => {
+                  if (!savingEdit) setEditOpen(false)
+                }}
+                onSave={saveEditForm}
+              />
+            )}
             {assistantOpen && (
               <ClientAssistantModal
                 cliente={cliente}
@@ -417,6 +560,144 @@ export function ClientDrawer({
         </motion.div>
       )}
     </AnimatePresence>
+  )
+}
+
+function ClientEditModal({
+  form,
+  saving,
+  onChange,
+  onClose,
+  onSave,
+}: {
+  form: ClientEditForm
+  saving: boolean
+  onChange: (value: ClientEditForm) => void
+  onClose: () => void
+  onSave: (value: ClientEditForm) => void
+}) {
+  function update<K extends keyof ClientEditForm>(key: K, value: ClientEditForm[K]) {
+    onChange({ ...form, [key]: value })
+  }
+
+  function updatePlan(planKey: string, screensCount = form.screensCount) {
+    const selected = officialPlan(planKey, screensCount)
+    onChange({
+      ...form,
+      planKey,
+      screensCount,
+      amount: (selected.amountCents / 100).toFixed(2).replace('.', ','),
+    })
+  }
+
+  return (
+    <div className="fixed inset-0 z-[75] flex items-end sm:items-center justify-center p-3" style={{ background: 'rgba(2,6,23,0.78)', backdropFilter: 'blur(10px)' }} onClick={onClose}>
+      <div className="w-full max-w-3xl max-h-[92vh] overflow-y-auto rounded-2xl" style={{ background: 'var(--background)', border: '1px solid var(--border)' }} onClick={(event) => event.stopPropagation()}>
+        <div className="sticky top-0 z-10 flex items-center justify-between gap-3 p-4" style={{ background: 'var(--background)', borderBottom: '1px solid var(--border)' }}>
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-slate-500">Cliente</p>
+            <h3 className="text-lg font-semibold text-white">Editar dados operacionais</h3>
+          </div>
+          <button disabled={saving} onClick={onClose} className="h-9 w-9 rounded-lg flex items-center justify-center text-slate-500 hover:text-white disabled:opacity-50" style={{ background: 'rgba(255,255,255,0.04)' }}>
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="grid gap-4 p-4 sm:grid-cols-2">
+          <EditField label="Nome" value={form.name} disabled={saving} onChange={(value) => update('name', value)} />
+          <EditField label="Telefone" value={form.phone} disabled={saving} onChange={(value) => update('phone', value)} />
+
+          <label className="block">
+            <span className="text-[10px] text-slate-500 uppercase tracking-wider">Status</span>
+            <select value={form.status} disabled={saving} onChange={(event) => update('status', event.target.value)} className="mt-2 h-11 w-full rounded-xl px-3 text-sm text-white outline-none disabled:opacity-60" style={{ background: 'var(--input)', border: '1px solid var(--border)' }}>
+              <option value="active">Ativo</option>
+              <option value="pending">Pendente</option>
+              <option value="expired">Expirado</option>
+              <option value="suspended">Suspenso</option>
+              <option value="lead">Lead</option>
+            </select>
+          </label>
+          <EditField label="App principal" value={form.app} disabled={saving} onChange={(value) => update('app', value)} />
+          <EditField label="Painel/provedor" value={form.panel} disabled={saving} onChange={(value) => update('panel', value)} />
+
+          <label className="block">
+            <span className="text-[10px] text-slate-500 uppercase tracking-wider">Plano</span>
+            <select value={form.planKey} disabled={saving} onChange={(event) => updatePlan(event.target.value)} className="mt-2 h-11 w-full rounded-xl px-3 text-sm text-white outline-none disabled:opacity-60" style={{ background: 'var(--input)', border: '1px solid var(--border)' }}>
+              {OFFICIAL_PLANS.map((plan) => (
+                <option key={plan.key} value={plan.key}>{plan.label}</option>
+              ))}
+            </select>
+          </label>
+
+          <label className="block">
+            <span className="text-[10px] text-slate-500 uppercase tracking-wider">Quantidade de telas</span>
+            <select value={String(form.screensCount)} disabled={saving} onChange={(event) => updatePlan(form.planKey, normalizeScreensCount(event.target.value))} className="mt-2 h-11 w-full rounded-xl px-3 text-sm text-white outline-none disabled:opacity-60" style={{ background: 'var(--input)', border: '1px solid var(--border)' }}>
+              <option value="1">1 tela</option>
+              <option value="2">2 telas</option>
+            </select>
+          </label>
+
+          <EditField label="Valor do plano" value={form.amount} disabled={saving} onChange={(value) => update('amount', value)} />
+          <label className="block">
+            <span className="text-[10px] text-slate-500 uppercase tracking-wider">Vencimento</span>
+            <input type="date" value={form.dueAt} disabled={saving} onChange={(event) => update('dueAt', event.target.value)} className="mt-2 h-11 w-full rounded-xl px-3 text-sm text-white outline-none disabled:opacity-60" style={{ background: 'var(--input)', border: '1px solid var(--border)' }} />
+          </label>
+
+          <EditField label="Usuário" value={form.username} disabled={saving} onChange={(value) => update('username', value)} />
+          <EditField label="Senha" type="password" value={form.password} disabled={saving} onChange={(value) => update('password', value)} />
+          <EditField label="Host/DNS" value={form.host} disabled={saving} onChange={(value) => update('host', value)} />
+          <EditField label="Provider/código" value={form.providerCode} disabled={saving} onChange={(value) => update('providerCode', value)} />
+
+          <label className="block sm:col-span-2">
+            <span className="text-[10px] text-slate-500 uppercase tracking-wider">Observações internas</span>
+            <textarea value={form.notes} disabled={saving} onChange={(event) => update('notes', event.target.value)} className="mt-2 min-h-24 w-full resize-none rounded-xl px-3 py-3 text-sm text-white outline-none disabled:opacity-60" style={{ background: 'var(--input)', border: '1px solid var(--border)' }} />
+          </label>
+        </div>
+
+        <div className="sticky bottom-0 flex flex-col gap-2 p-4 sm:flex-row" style={{ background: 'var(--background)', borderTop: '1px solid var(--border)' }}>
+          <div className="flex-1 text-xs text-slate-500">
+            Plano selecionado: {officialPlan(form.planKey, form.screensCount).displayLabel} · {formatCurrencyBRLFromCents(officialPlan(form.planKey, form.screensCount).amountCents)}
+          </div>
+          <button disabled={saving} onClick={onClose} className="h-10 rounded-xl px-4 text-sm font-medium text-slate-400 disabled:opacity-50" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)' }}>
+            Cancelar
+          </button>
+          <button disabled={saving || !form.name.trim()} onClick={() => onSave(form)} className="h-10 rounded-xl px-4 text-sm font-semibold text-white disabled:opacity-60" style={{ background: '#2563eb' }}>
+            <span className="inline-flex items-center gap-2">
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              {saving ? 'Salvando...' : 'Salvar'}
+            </span>
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function EditField({
+  label,
+  value,
+  type = 'text',
+  disabled,
+  onChange,
+}: {
+  label: string
+  value: string
+  type?: string
+  disabled?: boolean
+  onChange: (value: string) => void
+}) {
+  return (
+    <label className="block">
+      <span className="text-[10px] text-slate-500 uppercase tracking-wider">{label}</span>
+      <input
+        type={type}
+        value={value}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+        className="mt-2 h-11 w-full rounded-xl px-3 text-sm text-white outline-none disabled:opacity-60"
+        style={{ background: 'var(--input)', border: '1px solid var(--border)' }}
+      />
+    </label>
   )
 }
 

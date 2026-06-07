@@ -1,5 +1,13 @@
 import { maskSensitiveText } from '@/lib/services/masking'
 import { getSupabaseServerClient } from '@/lib/supabase/server'
+import {
+  PLAN_MONTHS,
+  normalizePlanKey,
+  normalizeScreensCount,
+  officialPlanLabel,
+  type PlanDurationKey,
+  type ScreensCount,
+} from '@/lib/services/official-plans'
 
 type JsonRecord = Record<string, unknown>
 
@@ -9,6 +17,8 @@ export type RenewClientInput = {
   amount_cents?: number
   due_at?: string
   months_to_add?: number
+  screens_count?: number
+  screens?: number
   note?: string
   idempotency_key?: string
   operator_ref?: string
@@ -56,32 +66,21 @@ class RenewalError extends Error {
 const runningRenewals = new Set<string>()
 const runningRenewalClients = new Set<string>()
 
-const PLAN_MONTHS: Record<string, number> = {
-  mensal: 1,
-  trimestral: 3,
-  semestral: 6,
-  anual: 12,
-}
-
 function db() {
   const client = getSupabaseServerClient()
   if (!client) throw new RenewalError(500, 'SUPABASE_NOT_CONFIGURED', 'Supabase server env ausente.')
   return client
 }
 
-function normalizePlan(value: unknown): string {
-  const key = String(value || 'mensal')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '')
-  if (PLAN_MONTHS[key]) return key
-  return 'mensal'
-}
-
 function safeMetadata(value: JsonRecord | null | undefined): JsonRecord {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
+}
+
+function metadataNumber(metadata: JsonRecord | null | undefined, key: string): number | null {
+  const source = safeMetadata(metadata)
+  const value = source[key]
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : null
 }
 
 function parseDueAt(value?: string): Date | null {
@@ -224,7 +223,8 @@ async function accountContext(clientId: string): Promise<AccountContext> {
 async function dispatchRenewal(input: {
   idempotencyKey: string
   client: ClientRow
-  plan: string
+  plan: PlanDurationKey
+  screensCount: ScreensCount
   amountCents: number
   dueAt: string
   account: AccountContext
@@ -243,7 +243,7 @@ async function dispatchRenewal(input: {
       activation: {
         app: input.account.app_name || '',
         panel: input.account.panel_name || '',
-        plan: planLabel(input.plan),
+        plan: planLabel(input.plan, input.screensCount),
         amount,
         dueAt: due,
       },
@@ -255,7 +255,8 @@ async function dispatchRenewal(input: {
         clientName: input.client.name || '',
         app: input.account.app_name || '',
         panel: input.account.panel_name || '',
-        plan: planLabel(input.plan),
+        plan: planLabel(input.plan, input.screensCount),
+        screens_count: input.screensCount,
         valor: amount,
         amount,
         vencimento: due,
@@ -267,19 +268,15 @@ async function dispatchRenewal(input: {
   return response.json().catch(() => ({ ok: false, code: 'INVALID_RESPONSE' }))
 }
 
-function planLabel(plan: string): string {
-  if (plan === 'mensal') return 'Mensal'
-  if (plan === 'trimestral') return 'Trimestral'
-  if (plan === 'semestral') return 'Semestral'
-  if (plan === 'anual') return 'Anual'
-  return plan
+function planLabel(plan: PlanDurationKey | string, screensCount: ScreensCount = 1): string {
+  return officialPlanLabel(plan, screensCount)
 }
 
 export async function renewClient(input: RenewClientInput) {
   const clientId = String(input.client_id || '').trim()
   if (!clientId) throw new RenewalError(400, 'CLIENT_ID_REQUIRED', 'Informe client_id.')
 
-  const plan = normalizePlan(input.plan)
+  const plan = normalizePlanKey(input.plan)
   const amountCents = amountToCents(input.amount_cents)
   const months = Number.isFinite(Number(input.months_to_add)) && Number(input.months_to_add) > 0
     ? Math.round(Number(input.months_to_add))
@@ -354,6 +351,13 @@ export async function renewClient(input: RenewClientInput) {
     if (renewalsError) throw new RenewalError(500, 'RENEWAL_LOOKUP_FAILED', renewalsError.message)
 
     const current = (renewalsData || [])[0] as RenewalRow | undefined
+    const screensCount = normalizeScreensCount(
+      input.screens_count ??
+      input.screens ??
+      metadataNumber(current?.metadata, 'screens_count') ??
+      metadataNumber(client.legacy_metadata, 'screens_count') ??
+      1
+    )
     const baseDate = parseDueAt(current?.due_at || undefined) || new Date()
     const explicitDue = parseDueAt(input.due_at)
     const nextDue = explicitDue || addMonths(baseDate, months)
@@ -386,6 +390,8 @@ export async function renewClient(input: RenewClientInput) {
       previous_due_at: current?.due_at || null,
       renewed_at: now,
       note: input.note || null,
+      screens_count: screensCount,
+      plan_label: planLabel(plan, screensCount),
     }
 
     if (current) {
@@ -439,6 +445,10 @@ export async function renewClient(input: RenewClientInput) {
             ...safeMetadata(client.legacy_metadata),
             latest_renewal_id: renewalId,
             renewal_due_at: nextDueIso,
+            plan_key: plan,
+            plan_label: planLabel(plan, screensCount),
+            screens_count: screensCount,
+            amount_cents: amountCents,
             renewed_at: now,
           },
         })
@@ -453,6 +463,8 @@ export async function renewClient(input: RenewClientInput) {
       previous_due_at: current?.due_at || null,
       new_due_at: nextDueIso,
       plan_key: plan,
+      plan_label: planLabel(plan, screensCount),
+      screens_count: screensCount,
       amount_cents: amountCents,
       idempotency_key: idempotencyKey,
       fingerprint,
@@ -480,6 +492,7 @@ export async function renewClient(input: RenewClientInput) {
       idempotencyKey,
       client,
       plan,
+      screensCount,
       amountCents,
       dueAt: nextDueIso,
       account,
@@ -503,6 +516,8 @@ export async function renewClient(input: RenewClientInput) {
         previous_due_at: current?.due_at || null,
         due_at: nextDueIso,
         plan_key: plan,
+        plan_label: planLabel(plan, screensCount),
+        screens_count: screensCount,
         amount_cents: amountCents,
       },
       dispatch,

@@ -349,16 +349,9 @@ export function TestesPage() {
 
   const handleExpirarTeste = async (teste: Teste) => {
     if (expiringTestId) return
-
-    const providerUrl = providerUrlForTest(teste)
-    const openedPanel = window.open('about:blank', '_blank')
-    if (openedPanel) {
-      openedPanel.opener = null
-      openedPanel.location.href = providerUrl
-	    }
-	    setBlockedPanelUrl(openedPanel ? null : providerUrl)
-	    setExpiringTestId(teste.id)
-	    setModalExpirar(null)
+    setBlockedPanelUrl(null)
+    setExpiringTestId(teste.id)
+    setModalExpirar(null)
 
     try {
       let copied = await safeCopyUsername(teste.copyUsername)
@@ -370,12 +363,6 @@ export function TestesPage() {
       })
       const data = await res.json().catch(() => null)
       if (!res.ok || !data?.success) throw new Error(data?.error || `HTTP ${res.status}`)
-      if (openedPanel && data.provider_url && openedPanel.location.href !== data.provider_url) {
-        openedPanel.location.href = data.provider_url
-      }
-      if (!openedPanel && data.provider_url) {
-        setBlockedPanelUrl(data.provider_url)
-      }
 
       const username = data.username || teste.usuario
       if (!copied && username) {

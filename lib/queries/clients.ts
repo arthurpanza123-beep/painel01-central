@@ -3,6 +3,7 @@ import crypto from 'crypto'
 import { MOCK_CLIENTES, type Cliente } from '@/lib/mock-data'
 import { maskPassword, maskPhone, maskUsername } from '@/lib/services/masking'
 import { formatDateBR } from '@/lib/services/date-normalizer'
+import { normalizeScreensCount, officialPlanLabel } from '@/lib/services/official-plans'
 import { getSupabaseServerClient, isSupabaseServerConfigured } from '@/lib/supabase/server'
 
 export type ClientsQueryResult = {
@@ -17,6 +18,7 @@ type ClientRow = {
   status: string | null
   source: string | null
   created_at: string | null
+  legacy_metadata: Record<string, unknown> | null
 }
 
 type AccountRow = {
@@ -42,6 +44,7 @@ type RenewalRow = {
   amount_cents: number | null
   status: string | null
   due_at: string | null
+  metadata: Record<string, unknown> | null
 }
 
 type AppRow = {
@@ -79,6 +82,12 @@ function mapPlan(planKey: string | null, amountCents: number | null): { plano: s
   return { plano, valor: Number(((amountCents || 0) / 100).toFixed(2)) }
 }
 
+function metadataNumber(metadata: Record<string, unknown> | null | undefined, key: string): number | null {
+  const value = metadata && typeof metadata === 'object' && !Array.isArray(metadata) ? metadata[key] : null
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
 function buildMockItems(): Cliente[] {
   return MOCK_CLIENTES.map((cliente) => ({
     ...cliente,
@@ -98,9 +107,9 @@ export async function getClientsData(): Promise<ClientsQueryResult> {
 
   try {
     const [clientsRes, accountsRes, renewalsRes, appsRes, panelsRes] = await Promise.all([
-      db.from('clients').select('id,name,phone_e164,status,source,created_at').order('created_at', { ascending: true }),
+      db.from('clients').select('id,name,phone_e164,status,source,created_at,legacy_metadata').order('created_at', { ascending: true }),
       db.from('accounts').select('id,client_id,username,password_secret,max_slots,status,expires_at,panel_external_id,provider,provider_code,app_id,panel_id,legacy_metadata').order('created_at', { ascending: true }),
-      db.from('renewals').select('id,client_id,plan_key,amount_cents,status,due_at').order('created_at', { ascending: true }),
+      db.from('renewals').select('id,client_id,plan_key,amount_cents,status,due_at,metadata').order('created_at', { ascending: true }),
       db.from('apps').select('id,name,key'),
       db.from('panels').select('id,name,key'),
     ])
@@ -124,7 +133,15 @@ export async function getClientsData(): Promise<ClientsQueryResult> {
       const appName = app?.name || account?.provider || 'Aplicativo'
       const serverName = panel?.name || account?.provider || 'Servidor'
       const dueDate = renewal?.due_at || account?.expires_at || client.created_at || ''
+      const inferredTwoScreens = account?.max_slots === 2 && Number(renewal?.amount_cents || 0) >= 3000 ? 2 : 1
+      const screensCount = normalizeScreensCount(
+        metadataNumber(renewal?.metadata, 'screens_count') ??
+        metadataNumber(client.legacy_metadata, 'screens_count') ??
+        metadataNumber(account?.legacy_metadata, 'screens_count') ??
+        inferredTwoScreens
+      )
       const { plano, valor } = mapPlan(renewal?.plan_key || null, renewal?.amount_cents || null)
+      const planWithScreens = renewal?.plan_key ? officialPlanLabel(renewal.plan_key, screensCount) : plano
 
       return {
         id: client.id,
@@ -132,7 +149,8 @@ export async function getClientsData(): Promise<ClientsQueryResult> {
         telefone: maskPhone(client.phone_e164 || ''),
         app: appName,
         servidor: serverName,
-        plano,
+        plano: planWithScreens,
+        telas: screensCount,
         valor,
         vencimento: formatDateBR(dueDate),
         usuario: maskUsername(account?.username || 'usuario'),

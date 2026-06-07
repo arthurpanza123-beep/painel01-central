@@ -79,7 +79,7 @@ export async function GET(_request: Request, context: RouteContext) {
   if (!db) return NextResponse.json({ success: false, error: 'Supabase server env ausente.' }, { status: 500 })
 
   const [clientRes, accountsRes, slotsRes, appsRes, panelsRes, renewalsRes] = await Promise.all([
-    db.from('clients').select('id,name,phone_e164,status').eq('id', id).maybeSingle(),
+    db.from('clients').select('id,name,phone_e164,status,legacy_metadata').eq('id', id).maybeSingle(),
     db.from('accounts').select('id,client_id,username,password_secret,m3u_url_secret,hls_url_secret,provider,provider_code,panel_external_id,app_id,panel_id,expires_at,legacy_metadata,created_at').eq('client_id', id).order('created_at', { ascending: false }),
     db.from('account_slots').select('id,account_id,client_id,slot_number,status').eq('client_id', id),
     db.from('apps').select('id,name,key'),
@@ -142,7 +142,7 @@ export async function GET(_request: Request, context: RouteContext) {
   const hasSlot = Boolean((slotsRes.data || []).length)
   const warnings: string[] = []
   if (String((clientRes.data as { status?: string | null }).status || '').toLowerCase() === 'active' && !hasSlot) {
-    warnings.push('Cliente ativo sem vaga/slot vinculado.')
+    warnings.push('Cliente ativo sem tela/slot vinculado.')
   }
 
   return NextResponse.json({

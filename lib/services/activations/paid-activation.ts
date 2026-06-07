@@ -1,6 +1,13 @@
 import { maskSensitiveText } from '@/lib/services/masking'
 import { getSupabaseServerClient } from '@/lib/supabase/server'
 import { findProvider } from '@/lib/config/provider-catalog'
+import {
+  officialPlanAmountCents,
+  normalizePlanKey,
+  normalizeScreensCount,
+  type PlanDurationKey,
+  type ScreensCount,
+} from '@/lib/services/official-plans'
 
 type JsonRecord = Record<string, unknown>
 
@@ -16,6 +23,8 @@ type ActivationInput = {
   panel_id?: string
   panel_key?: string
   plan_key?: string
+  screens_count?: number
+  screens?: number
   amount_cents?: number
   amount?: number
   due_at?: string
@@ -108,6 +117,7 @@ type ActivationContext = {
   app: AppRow
   panel: PanelRow | null
   plan_key: string
+  screens_count: ScreensCount
   amount_cents: number
   due_at: string
 }
@@ -225,10 +235,10 @@ function resolvePanelKey(input?: string): string {
   return normalized
 }
 
-function amountToCents(input: ActivationInput): number {
+function amountToCents(input: ActivationInput, planKey: PlanDurationKey = 'mensal', screensCount: ScreensCount = 1): number {
   if (Number.isFinite(input.amount_cents)) return Math.round(Number(input.amount_cents))
   if (Number.isFinite(input.amount)) return Math.round(Number(input.amount) * 100)
-  return 3500
+  return officialPlanAmountCents(planKey, screensCount)
 }
 
 function defaultDueAt(value?: string): string {
@@ -393,13 +403,17 @@ async function resolveContext(input: ActivationInput): Promise<ActivationContext
   const panelId = input.panel_id || test?.panel_id || accountDefaults?.panel_id
   const panel = await resolvePanel(database, panelId, input.panel_key)
 
+  const planKey = normalizePlanKey(input.plan_key)
+  const screensCount = normalizeScreensCount(input.screens_count ?? input.screens)
+
   return {
     client,
     test,
     app: appData as AppRow,
     panel,
-    plan_key: String(input.plan_key || 'mensal').trim() || 'mensal',
-    amount_cents: amountToCents(input),
+    plan_key: planKey,
+    screens_count: screensCount,
+    amount_cents: amountToCents(input, planKey, screensCount),
     due_at: defaultDueAt(input.due_at || test?.expires_at || undefined),
   }
 }
@@ -408,7 +422,7 @@ async function findFreeSlot(appId: string, panelId?: string | null, requested?: 
   account_id?: string
   slot_id?: string
   slot_number?: number
-}): Promise<{ account: AccountRow; slot: SlotRow; capacity: number } | null> {
+}, requiredSlots = 1): Promise<{ account: AccountRow; slot: SlotRow; slots: SlotRow[]; capacity: number } | null> {
   const database = db()
 
   let query = database
@@ -444,12 +458,35 @@ async function findFreeSlot(appId: string, panelId?: string | null, requested?: 
     !slot.client_id && ['free', 'released'].includes(String(slot.status || 'free'))
   )
   const accountById = new Map(accounts.map((account) => [account.id, account]))
+  const freeSlotsByAccount = new Map<string, SlotRow[]>()
 
   for (const slot of slots) {
-    const account = accountById.get(slot.account_id)
-    if (!account) continue
+    const list = freeSlotsByAccount.get(slot.account_id) || []
+    list.push(slot)
+    freeSlotsByAccount.set(slot.account_id, list)
+  }
+
+  for (const account of accounts) {
+    const accountSlots = freeSlotsByAccount.get(account.id) || []
     const capacity = Math.max(Number(account.max_slots || 1), 1)
-    if (slot.slot_number <= capacity) return { account, slot, capacity }
+    const eligibleSlots = accountSlots
+      .filter((slot) => slot.slot_number <= capacity)
+      .sort((a, b) => a.slot_number - b.slot_number)
+    if (eligibleSlots.length < requiredSlots) continue
+
+    let selectedSlots = eligibleSlots.slice(0, requiredSlots)
+    if (requested?.slot_id || requested?.slot_number) {
+      const requestedSlot = eligibleSlots.find((slot) =>
+        (requested.slot_id ? slot.id === requested.slot_id : true) &&
+        (requested.slot_number ? slot.slot_number === requested.slot_number : true)
+      )
+      if (!requestedSlot) continue
+      selectedSlots = [requestedSlot, ...eligibleSlots.filter((slot) => slot.id !== requestedSlot.id)].slice(0, requiredSlots)
+    }
+
+    const slot = selectedSlots[0]
+    if (!account) continue
+    if (selectedSlots.length >= requiredSlots) return { account, slot, slots: selectedSlots, capacity }
   }
 
   return null
@@ -463,7 +500,7 @@ function providerFromPanel(panel: PanelRow | null): string | null {
   return key || null
 }
 
-async function createConfirmedNewAccount(context: ActivationContext, input: ActivationInput): Promise<{ account: AccountRow; slot: SlotRow; capacity: number }> {
+async function createConfirmedNewAccount(context: ActivationContext, input: ActivationInput): Promise<{ account: AccountRow; slot: SlotRow; slots: SlotRow[]; capacity: number }> {
   if (!input.create_new_account_confirmed) {
     throw new ActivationError(409, 'NO_FREE_SLOT', 'Nenhuma tela livre compativel encontrada. Criacao de nova conta exige confirmacao do operador.')
   }
@@ -476,6 +513,9 @@ async function createConfirmedNewAccount(context: ActivationContext, input: Acti
 
   const database = db()
   const capacity = panelCapacity(context.panel)
+  if (context.screens_count > capacity) {
+    throw new ActivationError(409, 'PANEL_CAPACITY_INSUFFICIENT', `Este painel suporta ${capacity} tela${capacity > 1 ? 's' : ''} por conta.`)
+  }
   const now = new Date().toISOString()
   const { data: accountData, error: accountError } = await database
     .from('accounts')
@@ -524,13 +564,14 @@ async function createConfirmedNewAccount(context: ActivationContext, input: Acti
     throw new ActivationError(500, 'ACCOUNT_SLOTS_CREATE_FAILED', slotsError.message)
   }
 
-  const slot = ((slotsData || []) as SlotRow[]).find((row) => row.slot_number === 1)
+  const createdSlots = ((slotsData || []) as SlotRow[]).sort((a, b) => a.slot_number - b.slot_number)
+  const slot = createdSlots.find((row) => row.slot_number === 1)
   if (!slot) {
     await database.from('accounts').delete().eq('id', account.id)
     throw new ActivationError(500, 'ACCOUNT_SLOT_MISSING', 'Conta criada sem slot inicial.')
   }
 
-  return { account, slot, capacity }
+  return { account, slot, slots: createdSlots.slice(0, context.screens_count), capacity }
 }
 
 export async function getActivationRecommendation(input: {
@@ -543,6 +584,7 @@ export async function getActivationRecommendation(input: {
   account_id?: string
   slot_id?: string
   slot_number?: number
+  screens_count?: number
 }): Promise<ActivationRecommendation> {
   const context = await resolveContext({
     client_id: input.client_id,
@@ -552,6 +594,7 @@ export async function getActivationRecommendation(input: {
     panel_id: input.panel_id,
     panel_key: input.panel_key,
     account_id: input.account_id,
+    screens_count: input.screens_count,
   })
   await writeLog('ACTIVATION_RECOMMENDATION_REQUESTED', 'info', {
     client_id: context.client.id,
@@ -562,6 +605,7 @@ export async function getActivationRecommendation(input: {
       requested_panel_key: input.panel_key || null,
       app_key: context.app.key,
       panel_key: context.panel?.key || null,
+      screens_count: context.screens_count,
     },
   })
   await writeLog('ACTIVATION_PROVIDER_RESOLVED', 'info', {
@@ -575,9 +619,10 @@ export async function getActivationRecommendation(input: {
       panel_id: context.panel?.id || null,
       panel_key: context.panel?.key || null,
       panel_name: context.panel?.name || null,
+      screens_count: context.screens_count,
     },
   })
-  const found = await findFreeSlot(context.app.id, context.panel?.id || null, input)
+  const found = await findFreeSlot(context.app.id, context.panel?.id || null, input, context.screens_count)
   const capacity = panelCapacity(context.panel)
 
   if (!found) {
@@ -591,11 +636,12 @@ export async function getActivationRecommendation(input: {
         panel_id: context.panel?.id || null,
         panel_key: context.panel?.key || null,
         requires_new_account: true,
+        screens_count: context.screens_count,
       },
     })
     return {
       recommended: false,
-      reason: 'Nenhuma tela livre. Sera necessario criar nova conta.',
+      reason: context.screens_count > 1 ? 'Nenhuma conta com duas telas livres. Sera necessario criar nova conta.' : 'Nenhuma tela livre. Sera necessario criar nova conta.',
       account_id: null,
       account_label: null,
       slot_id: null,
@@ -612,7 +658,9 @@ export async function getActivationRecommendation(input: {
     }
   }
 
-  const reason = `Usar tela livre na ${slotLabel(found.slot.slot_number)} da conta ${accountLabel(found.account)} economiza credito`
+  const reason = context.screens_count > 1
+    ? `Usar ${context.screens_count} telas livres da conta ${accountLabel(found.account)} economiza credito`
+    : `Usar tela livre na ${slotLabel(found.slot.slot_number)} da conta ${accountLabel(found.account)} economiza credito`
   await writeLog('ACTIVATION_RECOMMENDATION_FOUND', 'info', {
     client_id: context.client.id,
     test_id: context.test?.id || null,
@@ -625,6 +673,8 @@ export async function getActivationRecommendation(input: {
       panel_key: context.panel?.key || null,
       slot_id: found.slot.id,
       slot_number: found.slot.slot_number,
+      slot_ids: found.slots.map((slot) => slot.id),
+      screens_count: context.screens_count,
       requires_new_account: false,
     },
   })
@@ -672,13 +722,13 @@ async function createPipelineEvent(eventType: string, payload: {
 export async function activatePaidClient(input: ActivationInput) {
   const database = db()
   const touched: {
-    slot?: { id: string; previous_status: string | null; previous_client_id: string | null }
+    slots: Array<{ id: string; previous_status: string | null; previous_client_id: string | null }>
     client?: { id: string; previous_status: string | null }
     renewal_id?: string
     test?: { id: string; previous_status: string | null; previous_account_id: string | null }
     account_id?: string
     created_account_id?: string
-  } = {}
+  } = { slots: [] }
 
   try {
     const context = await resolveContext(input)
@@ -695,6 +745,7 @@ export async function activatePaidClient(input: ActivationInput) {
         panel_key: context.panel?.key || null,
         account_id: input.account_id || null,
         slot_id: input.slot_id || null,
+        screens_count: context.screens_count,
       },
     })
     await writeLog('ACTIVATION_PROVIDER_RESOLVED', 'info', {
@@ -719,59 +770,71 @@ export async function activatePaidClient(input: ActivationInput) {
       account_id: input.account_id,
       slot_id: input.slot_id,
       slot_number: input.slot_number,
-    })
+    }, context.screens_count)
 
     if (!requestedSlot) {
       requestedSlot = await createConfirmedNewAccount(context, input)
       touched.created_account_id = requestedSlot.account.id
     }
 
-    const { account, slot } = requestedSlot
+    const { account, slot, slots } = requestedSlot
     const now = new Date().toISOString()
+    const occupiedSlots: SlotRow[] = []
 
-    const { data: occupiedSlot, error: occupyError } = await database
-      .from('account_slots')
-      .update({
-        client_id: context.client.id,
-        status: 'occupied',
-        assigned_at: now,
-        released_at: null,
-        expires_at: context.due_at,
-        metadata: {
-          paid_activation: true,
+    for (const selectedSlot of slots) {
+      const { data: occupiedSlot, error: occupyError } = await database
+        .from('account_slots')
+        .update({
+          client_id: context.client.id,
+          status: 'occupied',
+          assigned_at: now,
+          released_at: null,
+          expires_at: context.due_at,
+          metadata: {
+            paid_activation: true,
+            test_id: context.test?.id || null,
+            app_id: context.app.id,
+            panel_id: context.panel?.id || null,
+            plan_key: context.plan_key,
+            screens_count: context.screens_count,
+          },
+        })
+        .eq('id', selectedSlot.id)
+        .is('client_id', null)
+        .in('status', ['free', 'released'])
+        .select('id,account_id,client_id,slot_number,status,assigned_at,expires_at')
+        .maybeSingle()
+
+      if (occupyError) throw new ActivationError(500, 'SLOT_OCCUPY_FAILED', occupyError.message)
+      if (!occupiedSlot) {
+        await writeLog('ACTIVATION_SLOT_OCCUPIED', 'warning', {
+          client_id: context.client.id,
           test_id: context.test?.id || null,
-          app_id: context.app.id,
-          panel_id: context.panel?.id || null,
-          plan_key: context.plan_key,
-        },
-      })
-      .eq('id', slot.id)
-      .is('client_id', null)
-      .in('status', ['free', 'released'])
-      .select('id,account_id,client_id,slot_number,status,assigned_at,expires_at')
-      .maybeSingle()
+          account_id: account.id,
+          message: 'Tela ja foi ocupada por outro cliente.',
+          metadata: { slot_id: selectedSlot.id, slot_number: selectedSlot.slot_number },
+        })
+        throw new ActivationError(409, 'SLOT_ALREADY_OCCUPIED', 'Tela ja foi ocupada por outro cliente.')
+      }
 
-    if (occupyError) throw new ActivationError(500, 'SLOT_OCCUPY_FAILED', occupyError.message)
-    if (!occupiedSlot) {
-      await writeLog('ACTIVATION_SLOT_OCCUPIED', 'warning', {
-        client_id: context.client.id,
-        test_id: context.test?.id || null,
-        account_id: account.id,
-        message: 'Tela ja foi ocupada por outro cliente.',
-        metadata: { slot_id: slot.id, slot_number: slot.slot_number },
-      })
-      throw new ActivationError(409, 'SLOT_ALREADY_OCCUPIED', 'Tela ja foi ocupada por outro cliente.')
+      occupiedSlots.push(occupiedSlot as SlotRow)
+      touched.slots.push({ id: selectedSlot.id, previous_status: selectedSlot.status, previous_client_id: selectedSlot.client_id })
     }
 
-    touched.slot = { id: slot.id, previous_status: slot.status, previous_client_id: slot.client_id }
     touched.account_id = account.id
 
     await writeLog('ACCOUNT_SLOT_USED', 'success', {
       client_id: context.client.id,
       test_id: context.test?.id || null,
       account_id: account.id,
-      message: `${slotLabel(slot.slot_number)} ocupada na conta ${accountLabel(account)}.`,
-      metadata: { slot_id: slot.id, slot_number: slot.slot_number },
+      message: `${context.screens_count} tela${context.screens_count > 1 ? 's' : ''} ocupada${context.screens_count > 1 ? 's' : ''} na conta ${accountLabel(account)}.`,
+      metadata: {
+        slot_id: slot.id,
+        slot_number: slot.slot_number,
+        slot_ids: occupiedSlots.map((item) => item.id),
+        slot_numbers: occupiedSlots.map((item) => item.slot_number),
+        screens_count: context.screens_count,
+      },
     })
 
     const { error: clientError } = await database
@@ -783,6 +846,8 @@ export async function activatePaidClient(input: ActivationInput) {
           activated_from_test_id: context.test?.id || null,
           active_account_id: account.id,
           active_slot_id: slot.id,
+          active_slot_ids: occupiedSlots.map((item) => item.id),
+          screens_count: context.screens_count,
           paid_activation_at: now,
         },
       })
@@ -796,7 +861,7 @@ export async function activatePaidClient(input: ActivationInput) {
       test_id: context.test?.id || null,
       account_id: account.id,
       message: `Cliente ${context.client.name || context.client.id} ativado como pago.`,
-      metadata: { slot_id: slot.id, plan_key: context.plan_key, due_at: context.due_at },
+      metadata: { slot_id: slot.id, slot_ids: occupiedSlots.map((item) => item.id), plan_key: context.plan_key, screens_count: context.screens_count, due_at: context.due_at },
     })
 
     if (context.test) {
@@ -809,6 +874,8 @@ export async function activatePaidClient(input: ActivationInput) {
             ...(context.test.legacy_metadata || {}),
             converted_to_paid_at: now,
             active_slot_id: slot.id,
+            active_slot_ids: occupiedSlots.map((item) => item.id),
+            screens_count: context.screens_count,
             paid_activation: true,
           },
         })
@@ -845,6 +912,8 @@ export async function activatePaidClient(input: ActivationInput) {
           test_id: context.test?.id || null,
           app_id: context.app.id,
           panel_id: context.panel?.id || null,
+          screens_count: context.screens_count,
+          slot_ids: occupiedSlots.map((item) => item.id),
         },
       })
       .select('id,due_at,plan_key,amount_cents,status')
@@ -858,7 +927,7 @@ export async function activatePaidClient(input: ActivationInput) {
       test_id: context.test?.id || null,
       account_id: account.id,
       message: `Renovacao criada para ${context.due_at}.`,
-      metadata: { renewal_id: renewal.id, slot_id: slot.id, amount_cents: context.amount_cents },
+      metadata: { renewal_id: renewal.id, slot_id: slot.id, slot_ids: occupiedSlots.map((item) => item.id), amount_cents: context.amount_cents, screens_count: context.screens_count },
     })
 
     await createPipelineEvent('paid_activation_completed', {
@@ -874,6 +943,8 @@ export async function activatePaidClient(input: ActivationInput) {
         app_id: context.app.id,
         panel_id: context.panel?.id || null,
         renewal_id: renewal.id,
+        slot_ids: occupiedSlots.map((item) => item.id),
+        screens_count: context.screens_count,
         reused_existing_slot: true,
       },
     })
@@ -886,6 +957,8 @@ export async function activatePaidClient(input: ActivationInput) {
       metadata: {
         slot_id: slot.id,
         slot_number: slot.slot_number,
+        slot_ids: occupiedSlots.map((item) => item.id),
+        screens_count: context.screens_count,
         app_key: context.app.key,
         panel_key: context.panel?.key || null,
         renewal_id: renewal.id,
@@ -903,6 +976,8 @@ export async function activatePaidClient(input: ActivationInput) {
         slot_id: slot.id,
         slot_number: slot.slot_number,
         slot_label: slotLabel(slot.slot_number),
+        slot_ids: occupiedSlots.map((item) => item.id),
+        screens_count: context.screens_count,
         renewal_id: renewal.id,
         plan_key: context.plan_key,
         amount_cents: context.amount_cents,
@@ -920,16 +995,16 @@ export async function activatePaidClient(input: ActivationInput) {
     if (touched.client) {
       await database.from('clients').update({ status: touched.client.previous_status }).eq('id', touched.client.id)
     }
-    if (touched.slot) {
+    for (const touchedSlot of touched.slots) {
       await database
         .from('account_slots')
         .update({
-          client_id: touched.slot.previous_client_id,
-          status: touched.slot.previous_status || 'free',
+          client_id: touchedSlot.previous_client_id,
+          status: touchedSlot.previous_status || 'free',
           assigned_at: null,
           expires_at: null,
         })
-        .eq('id', touched.slot.id)
+        .eq('id', touchedSlot.id)
     }
     if (touched.created_account_id) {
       await database.from('accounts').delete().eq('id', touched.created_account_id)
