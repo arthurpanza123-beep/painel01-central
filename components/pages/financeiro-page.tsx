@@ -85,10 +85,6 @@ function BigKPI({
       className="relative rounded-2xl p-5 overflow-hidden"
       style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
     >
-      <div
-        className="absolute -top-10 -right-10 h-28 w-28 rounded-full opacity-[0.08]"
-        style={{ background: `radial-gradient(circle, ${color}, transparent 70%)` }}
-      />
       <div className="relative">
         <div
           className="flex h-9 w-9 items-center justify-center rounded-lg mb-4"
