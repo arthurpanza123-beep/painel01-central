@@ -42,6 +42,17 @@ type ActivationInput = {
     device_key?: string
     expires_at?: string
   }
+  credentials?: {
+    username?: string
+    password?: string
+    host?: string
+    due_at?: string
+    provider_code?: string
+    code?: string
+    panel_name?: string
+    app_name?: string
+    raw_text?: string
+  }
   operator_ref?: string
 }
 
@@ -75,6 +86,8 @@ type AccountRow = {
   app_id: string
   panel_id: string | null
   username: string | null
+  password_secret: string | null
+  device_key?: string | null
   provider: string | null
   provider_code: string | null
   panel_external_id: string | null
@@ -414,7 +427,7 @@ async function resolveContext(input: ActivationInput): Promise<ActivationContext
     plan_key: planKey,
     screens_count: screensCount,
     amount_cents: amountToCents(input, planKey, screensCount),
-    due_at: defaultDueAt(input.due_at || test?.expires_at || undefined),
+    due_at: defaultDueAt(input.due_at || input.credentials?.due_at || test?.expires_at || undefined),
   }
 }
 
@@ -427,7 +440,7 @@ async function findFreeSlot(appId: string, panelId?: string | null, requested?: 
 
   let query = database
     .from('accounts')
-    .select('id,app_id,panel_id,username,provider,provider_code,panel_external_id,max_slots,status,expires_at')
+    .select('id,app_id,panel_id,username,password_secret,device_key,provider,provider_code,panel_external_id,max_slots,status,expires_at')
     .eq('app_id', appId)
     .eq('status', 'active')
     .order('created_at', { ascending: true })
@@ -539,7 +552,7 @@ async function createConfirmedNewAccount(context: ActivationContext, input: Acti
         test_id: context.test?.id || null,
       },
     })
-    .select('id,app_id,panel_id,username,provider,provider_code,panel_external_id,max_slots,status,expires_at')
+    .select('id,app_id,panel_id,username,password_secret,device_key,provider,provider_code,panel_external_id,max_slots,status,expires_at')
     .single()
 
   if (accountError) throw new ActivationError(500, 'ACCOUNT_CREATE_FAILED', accountError.message)
@@ -572,6 +585,20 @@ async function createConfirmedNewAccount(context: ActivationContext, input: Acti
   }
 
   return { account, slot, slots: createdSlots.slice(0, context.screens_count), capacity }
+}
+
+function activationCredentials(context: ActivationContext, input: ActivationInput, account: AccountRow) {
+  const source = input.credentials || {}
+  return {
+    username: source.username || account.username || undefined,
+    password: source.password || account.password_secret || undefined,
+    host: source.host || undefined,
+    provider_code: source.provider_code || account.provider_code || undefined,
+    code: source.code || undefined,
+    device_key: account.device_key || undefined,
+    app: source.app_name || context.app.name,
+    panel: source.panel_name || context.panel?.name || undefined,
+  }
 }
 
 export async function getActivationRecommendation(input: {
@@ -962,8 +989,11 @@ export async function activatePaidClient(input: ActivationInput) {
         app_key: context.app.key,
         panel_key: context.panel?.key || null,
         renewal_id: renewal.id,
+        pasted_credentials: Boolean(input.credentials?.raw_text),
       },
     })
+
+    const credentials = activationCredentials(context, input, account)
 
     return {
       success: true,
@@ -982,6 +1012,7 @@ export async function activatePaidClient(input: ActivationInput) {
         plan_key: context.plan_key,
         amount_cents: context.amount_cents,
         due_at: context.due_at,
+        credentials,
         reused_existing_slot: true,
       },
     }

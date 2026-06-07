@@ -4,6 +4,7 @@ import { MOCK_CLIENTES, type Cliente } from '@/lib/mock-data'
 import { maskPassword, maskPhone, maskUsername } from '@/lib/services/masking'
 import { formatDateBR } from '@/lib/services/date-normalizer'
 import { normalizeScreensCount, officialPlanLabel } from '@/lib/services/official-plans'
+import { isOperationalNoise } from '@/lib/services/operational-window'
 import { getSupabaseServerClient, isSupabaseServerConfigured } from '@/lib/supabase/server'
 
 export type ClientsQueryResult = {
@@ -17,6 +18,7 @@ type ClientRow = {
   phone_e164: string | null
   status: string | null
   source: string | null
+  notes: string | null
   created_at: string | null
   legacy_metadata: Record<string, unknown> | null
 }
@@ -97,6 +99,30 @@ function buildMockItems(): Cliente[] {
   }))
 }
 
+function providerDisplayName(provider?: string | null): string {
+  const key = String(provider || '').toLowerCase()
+  if (!key) return ''
+  if (key.includes('xbr') || key.includes('devx')) return 'XBR / DevXTop'
+  if (key.includes('yellow')) return 'Brasil / Yellow Box'
+  if (key.includes('ninety')) return 'Ninety'
+  if (key.includes('cinemax')) return 'CineMax'
+  if (key.includes('area')) return 'AreaPlay'
+  return provider || ''
+}
+
+function isTruthyMetadataFlag(metadata: Record<string, unknown> | null | undefined, key: string): boolean {
+  const value = metadata && typeof metadata === 'object' && !Array.isArray(metadata) ? metadata[key] : null
+  return value === true || value === 'true' || value === 1 || value === '1'
+}
+
+function isMainOperationalClient(client: ClientRow): boolean {
+  const status = String(client.status || '').toLowerCase()
+  if (['archived', 'deleted', 'cancelled', 'test_active', 'lead'].includes(status)) return false
+  if (isTruthyMetadataFlag(client.legacy_metadata, 'operational_noise')) return false
+  const joined = [client.name, client.source, client.notes].filter(Boolean).join(' ')
+  return !isOperationalNoise(joined)
+}
+
 export async function getClientsData(): Promise<ClientsQueryResult> {
   if (!isSupabaseServerConfigured) {
     return { data_source: 'mock', items: buildMockItems() }
@@ -107,7 +133,7 @@ export async function getClientsData(): Promise<ClientsQueryResult> {
 
   try {
     const [clientsRes, accountsRes, renewalsRes, appsRes, panelsRes] = await Promise.all([
-      db.from('clients').select('id,name,phone_e164,status,source,created_at,legacy_metadata').order('created_at', { ascending: true }),
+      db.from('clients').select('id,name,phone_e164,status,source,notes,created_at,legacy_metadata').order('created_at', { ascending: true }),
       db.from('accounts').select('id,client_id,username,password_secret,max_slots,status,expires_at,panel_external_id,provider,provider_code,app_id,panel_id,legacy_metadata').order('created_at', { ascending: true }),
       db.from('renewals').select('id,client_id,plan_key,amount_cents,status,due_at,metadata').order('created_at', { ascending: true }),
       db.from('apps').select('id,name,key'),
@@ -125,13 +151,15 @@ export async function getClientsData(): Promise<ClientsQueryResult> {
     const accountByClientId = new Map((accountsRes.data as AccountRow[] || []).map((row) => [row.client_id || '', row]))
     const renewalByClientId = new Map((renewalsRes.data as RenewalRow[] || []).map((row) => [row.client_id || '', row]))
 
-    const items: Cliente[] = (clientsRes.data as ClientRow[] || []).map((client) => {
+    const items: Cliente[] = (clientsRes.data as ClientRow[] || [])
+      .filter(isMainOperationalClient)
+      .map((client) => {
       const account = accountByClientId.get(client.id)
       const renewal = renewalByClientId.get(client.id)
       const app = account?.app_id ? appsById.get(account.app_id) : null
       const panel = account?.panel_id ? panelsById.get(account.panel_id) : null
       const appName = app?.name || account?.provider || 'Aplicativo'
-      const serverName = panel?.name || account?.provider || 'Servidor'
+      const serverName = panel?.name || providerDisplayName(account?.provider) || 'Servidor'
       const dueDate = renewal?.due_at || account?.expires_at || client.created_at || ''
       const inferredTwoScreens = account?.max_slots === 2 && Number(renewal?.amount_cents || 0) >= 3000 ? 2 : 1
       const screensCount = normalizeScreensCount(

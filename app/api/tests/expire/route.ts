@@ -9,6 +9,7 @@ import {
   isCustomerExpiredStickerSatisfied,
   metadataString,
   safeMetadata,
+  xcloudDeviceKey,
 } from '@/lib/services/test-expiration-operational'
 import { getSupabaseServerClient } from '@/lib/supabase/server'
 import { runXcloudWorker } from '@/lib/services/xcloud-worker'
@@ -19,6 +20,10 @@ const expiringTests = new Set<string>()
 
 function panelUrl(keyOrName: string | null | undefined) {
   return getProviderPanelUrl(String(keyOrName || '')) || getProviderPanelUrl('Yellow Box') || 'https://pedidospec.online/#/customers'
+}
+
+function xcloudDevicesUrl() {
+  return String(process.env.XCLOUD_DEVICES_URL || process.env.XCLOUD_PANEL_URL || '').trim()
 }
 
 function isOperatorNoticeSent(metadata: JsonRecord): boolean {
@@ -78,6 +83,7 @@ async function dispatchOperatorExpiredNotice(db: NonNullable<ReturnType<typeof g
   source: 'manual' | 'auto'
   providerUrl: string
   xcloudRemoveStatus: string
+  deviceKey: string
   manualCloseRequired: boolean
 }) {
   const operatorIdempotencyKey = `operator_test_expired:${input.test.id}`
@@ -103,6 +109,7 @@ async function dispatchOperatorExpiredNotice(db: NonNullable<ReturnType<typeof g
         link,
         provider_url: input.providerUrl,
         xcloud_remove_status: input.xcloudRemoveStatus,
+        device_key: input.deviceKey,
         manual_close_required: input.manualCloseRequired,
       },
       context: {
@@ -115,6 +122,7 @@ async function dispatchOperatorExpiredNotice(db: NonNullable<ReturnType<typeof g
         link,
         provider_url: input.providerUrl,
         xcloud_remove_status: input.xcloudRemoveStatus,
+        device_key: input.deviceKey,
         manual_close_required: input.manualCloseRequired,
         idempotency_key: operatorIdempotencyKey,
       },
@@ -655,15 +663,15 @@ export async function POST(req: NextRequest) {
       })
       const xcloudRemoveStatus = noticeXcloudState.required
         ? noticeXcloudState.alreadyRemoved
-          ? 'ja removido'
+          ? 'removido corretamente'
           : noticeXcloudState.removed
-            ? 'removido automaticamente'
-            : noticeXcloudState.status === 'failed'
-              ? 'falhou'
-              : 'pendente'
+            ? 'removido corretamente'
+            : 'falhou'
         : 'nao se aplica'
       const manualCloseRequired = !noticeXcloudState.required
-      const noticeProviderUrl = manualCloseRequired ? providerUrl : ''
+      const noticeProviderUrl = noticeXcloudState.required
+        ? noticeXcloudState.satisfied ? '' : xcloudDevicesUrl()
+        : providerUrl
 
 	    operatorNoticeResult = await dispatchOperatorExpiredNotice(db, {
 	      test,
@@ -676,6 +684,7 @@ export async function POST(req: NextRequest) {
       operatorRef,
       providerUrl: noticeProviderUrl,
       xcloudRemoveStatus,
+      deviceKey: xcloudDeviceKey({ deviceKey: test.device_key, metadata: operationalMetadata }),
       manualCloseRequired,
 	      source: body.source === 'auto' ? 'auto' : 'manual',
 	    }).catch((error) => ({ ok: false, error: error instanceof Error ? error.message : String(error) }))

@@ -549,13 +549,18 @@ function publicTestMessage(input: {
   providerCode?: string
   expiresAt: string
 }) {
+  const app = input.appName.toLowerCase()
+  const credentialHeader = app.includes('xcloud')
+    ? input.host ? `Host/DNS: ${input.host}` : ''
+    : app.includes('blessed')
+      ? input.providerCode ? `Provider: ${input.providerCode}` : ''
+      : input.providerCode ? `Codigo: ${input.providerCode}` : ''
   return [
     'Teste ativado com sucesso!',
     '',
     `Cliente: ${input.clientName}`,
     `App: ${input.appName}`,
-    input.providerCode ? `Codigo: ${input.providerCode}` : '',
-    input.host ? `Host: ${input.host}` : '',
+    credentialHeader,
     `Usuario: ${input.username}`,
     `Senha: ${input.password}`,
     `Validade: ${input.expiresAt}`,

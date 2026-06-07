@@ -4,16 +4,12 @@ import { useEffect, useState } from 'react'
 import dynamic from 'next/dynamic'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
-  AlertTriangle,
   Clock3,
-  DollarSign,
   Headphones,
   Kanban,
   LayoutDashboard,
   Menu,
   RefreshCw,
-  Settings,
-  Terminal,
   TestTube2,
   Users,
   Wallet,
@@ -59,10 +55,6 @@ const NAV_ITEMS: { id: NavPage; label: string; Icon: React.FC<{ className?: stri
   { id: 'clientes', label: 'Clientes', Icon: Users },
   { id: 'contas', label: 'Contas / Telas', Icon: Wallet },
   { id: 'renovacoes', label: 'Renovações', Icon: RefreshCw },
-  { id: 'financeiro', label: 'Financeiro', Icon: DollarSign },
-  { id: 'problemas', label: 'Problemas', Icon: AlertTriangle },
-  { id: 'configuracoes', label: 'Configurações', Icon: Settings },
-  { id: 'debug', label: 'Logs', Icon: Terminal },
 ]
 
 type OperationalSettings = {
@@ -270,15 +262,17 @@ function MobileNav({ open, activePage, onClose, onNavigate, settings, busy, onTo
           onClick={onClose}
         >
           <motion.div
-            initial={{ y: 24, opacity: 0 }}
+            initial={{ y: -24, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
-            exit={{ y: 24, opacity: 0 }}
-            className="absolute bottom-0 left-0 right-0 max-h-[86vh] overflow-y-auto rounded-t-2xl p-4"
+            exit={{ y: -24, opacity: 0 }}
+            className="fixed top-0 left-0 right-0 w-full max-h-[86vh] overflow-y-auto rounded-b-2xl p-4"
             style={{
-              paddingBottom: 'calc(16px + env(safe-area-inset-bottom))',
+              paddingTop: 'calc(16px + env(safe-area-inset-top))',
+              paddingLeft: 'calc(16px + env(safe-area-inset-left))',
+              paddingRight: 'calc(16px + env(safe-area-inset-right))',
               background: 'var(--background)',
-              borderTop: '1px solid var(--border)',
-              boxShadow: '0 -12px 34px rgba(0,0,0,0.44)',
+              borderBottom: '1px solid var(--border)',
+              boxShadow: '0 12px 34px rgba(0,0,0,0.44)',
             }}
             onClick={(event) => event.stopPropagation()}
           >
@@ -292,26 +286,26 @@ function MobileNav({ open, activePage, onClose, onNavigate, settings, busy, onTo
               </button>
             </div>
             <GameModeMobileRow settings={settings} busy={busy} onToggle={onToggleGameMode} />
-            <div className="grid grid-cols-2 gap-2">
+            <nav className="flex flex-col gap-1">
               {NAV_ITEMS.map(({ id, label, Icon }) => {
                 const active = activePage === id
                 return (
                   <button
                     key={id}
                     onClick={() => onNavigate(id)}
-                    className="flex min-h-12 items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-medium"
+                    className="flex h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-sm font-medium transition-colors"
                     style={{
-                      background: active ? 'rgba(59,130,246,0.16)' : 'rgba(255,255,255,0.035)',
-                      border: active ? '1px solid rgba(59,130,246,0.34)' : '1px solid rgba(255,255,255,0.06)',
+                      background: active ? 'rgba(59,130,246,0.16)' : 'transparent',
+                      border: active ? '1px solid rgba(59,130,246,0.34)' : '1px solid transparent',
                       color: active ? '#bfdbfe' : '#cbd5e1',
                     }}
                   >
-                    <Icon className="h-4 w-4 shrink-0" />
-                    <span>{label}</span>
+                    <Icon className="h-[18px] w-[18px] shrink-0" />
+                    <span className="truncate">{label}</span>
                   </button>
                 )
               })}
-            </div>
+            </nav>
           </motion.div>
         </motion.div>
       )}

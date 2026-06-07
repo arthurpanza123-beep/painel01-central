@@ -213,6 +213,9 @@ export interface DashboardMetrics {
   /** Financeiro */
   available_credits: number
   revenue_current_month: number
+  revenue_today?: number
+  activated_today?: number
+  monthly_renewal_base?: number
   monthly_renewal_forecast?: number
   revenue_due_30d?: number
   revenue_forecast_30d: number

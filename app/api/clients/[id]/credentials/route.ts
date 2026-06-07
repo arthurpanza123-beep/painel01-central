@@ -50,12 +50,13 @@ function hostFromUrl(value: string): string {
 }
 
 function buildCredentialText(item: BuiltCredentials): string {
+  const fields = item.fields || []
   return [
     `App: ${item.app}`,
-    item.providerCode ? `Provider: ${item.providerCode}` : null,
-    item.code ? `Codigo: ${item.code}` : null,
-    item.dns ? `DNS: ${item.dns}` : null,
-    item.host ? `Host: ${item.host}` : null,
+    fields.includes('provider') && item.providerCode ? `Provider: ${item.providerCode}` : null,
+    fields.includes('code') && item.code ? `Codigo: ${item.code}` : null,
+    fields.includes('dns') && item.dns ? `DNS: ${item.dns}` : null,
+    fields.includes('host') && item.host ? `Host: ${item.host}` : null,
     item.username ? `Usuario: ${item.username}` : null,
     item.password ? `Senha: ${item.password}` : null,
     item.downloader ? `Downloader: ${item.downloader}` : null,

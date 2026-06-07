@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   Copy, CheckCircle, ArrowRight, ArrowLeft,
   RotateCcw, Zap, Server, User, Phone, ChevronDown,
-  ExternalLink, PlayCircle, FileText, X
+  PlayCircle, FileText, X
 } from 'lucide-react'
 import { useToast } from '@/components/ui/toast'
 import { cn } from '@/lib/utils'
@@ -397,27 +397,6 @@ export function GerarTesteWizard() {
     setTimeout(() => setCopied(false), 2000)
   }
 
-  const handleAbrirPainel2 = () => {
-    if (!teste?.id) {
-      window.open('https://painel2.centralplayplus.com.br', '_blank')
-      return
-    }
-    const params = new URLSearchParams({
-      source: 'painel1',
-      test_id: teste.id,
-      ...(teste.clientId ? { client_id: teste.clientId } : {}),
-      client_name: form.nome,
-      client_phone: form.telefone,
-      app: form.app,
-      panel: form.servidor,
-      flow: 'test_created',
-    })
-    if (form.app === 'xcloud' && form.deviceKey) {
-      params.set('device_key', form.deviceKey)
-    }
-    window.open(`https://painel2.centralplayplus.com.br?${params.toString()}`, '_blank')
-  }
-
   const handleConcluir = async () => {
     if (!teste?.id) return
     if (teste.dispatch?.ok && teste.dispatch.status !== 'failed') {
@@ -622,7 +601,6 @@ export function GerarTesteWizard() {
                 copied={copied}
                 onCopiar={handleCopiar}
                 onConcluir={handleConcluir}
-                onAbrirPainel2={handleAbrirPainel2}
                 onAtivarCliente={handleAtivarCliente}
                 onVerLog={handleVerLog}
                 onRetryXcloud={handleRetryXcloud}
@@ -1257,7 +1235,6 @@ function TelaSucesso({
   copied,
   onCopiar,
   onConcluir,
-  onAbrirPainel2,
   onAtivarCliente,
   onVerLog,
   onRetryXcloud,
@@ -1275,7 +1252,6 @@ function TelaSucesso({
   copied: boolean
   onCopiar: () => void
   onConcluir: () => void
-  onAbrirPainel2: () => void
   onAtivarCliente: () => void
   onVerLog: () => void
   onRetryXcloud: () => void
@@ -1537,18 +1513,6 @@ function TelaSucesso({
             >
               <CheckCircle className="h-[18px] w-[18px]" />
               Concluir
-            </button>
-            <button
-              onClick={onAbrirPainel2}
-              className="flex h-12 items-center justify-center gap-2 rounded-xl text-sm font-medium transition-all"
-              style={{
-                background: 'rgba(37,99,235,0.12)',
-                border: '1px solid rgba(37,99,235,0.24)',
-                color: '#93c5fd',
-              }}
-            >
-              <ExternalLink className="h-[18px] w-[18px]" />
-              Abrir Painel 2
             </button>
           </motion.div>
 

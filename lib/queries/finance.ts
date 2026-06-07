@@ -189,7 +189,7 @@ export async function getFinanceData(): Promise<FinanceQueryResult> {
       .reduce((acc, r) => acc + money(r.amount_cents), 0)
     const monthlyForecast = calculateMonthlyRenewalForecast(clients, renewals)
     const porPlanoMap = Object.fromEntries(monthlyForecast.byPlan)
-    const clientesAtivos = clients.filter((c) => c.status === 'active').length
+    const clientesAtivos = clients.filter((c) => c.status === 'active' && !isTemporaryClient(c)).length
     const testesPagos = tests.filter((t) => t.status === 'converted').length
     const testesAtivosHoje = tests.filter((t) => t.status === 'active').length
     const totalTestes = tests.length

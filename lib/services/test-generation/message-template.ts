@@ -18,6 +18,11 @@ export function buildMessageText(input: GenerateTestInput, connection: TestConne
   const validUntil = new Date(expiresAt).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
   const app = APP_LABELS[input.app] || input.app
   const provider = PROVIDER_LABELS[input.provider] || input.provider
+  const credentialHeader = input.app === 'xcloud'
+    ? connection.xtream_host ? `Host/DNS: ${connection.xtream_host}` : null
+    : input.app === 'blessed'
+      ? connection.provider_code ? `Provider: ${connection.provider_code}` : null
+      : connection.provider_code ? `Código: ${connection.provider_code}` : null
 
   if (input.app === 'manual') {
     return [
@@ -37,8 +42,7 @@ export function buildMessageText(input: GenerateTestInput, connection: TestConne
     `Cliente: ${input.clientName}`,
     `Aplicativo: ${app}`,
     `Servidor: ${provider}`,
-    connection.provider_code ? `Código: ${connection.provider_code}` : null,
-    connection.xtream_host ? `Host: ${connection.xtream_host}` : null,
+    credentialHeader,
     connection.xtream_username ? `Usuário: ${connection.xtream_username}` : null,
     connection.xtream_password ? `Senha: ${connection.xtream_password}` : null,
     `Validade: ${validUntil}`,

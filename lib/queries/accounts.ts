@@ -50,7 +50,7 @@ function buildMockItems(): Conta[] {
 function resolveServer(panel: PanelRow | undefined, account: AccountRow): string {
   if (panel?.name) return panel.name
   if (account.provider === 'yellow_box') return 'Yellow Box'
-  if (account.provider === 'xbr') return 'Ninety'
+  if (account.provider === 'xbr') return 'XBR / DevXTop'
   if (account.provider) return account.provider
   return 'Servidor'
 }

@@ -2,11 +2,12 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { CheckCircle, ChevronRight, Search, UserPlus, Users, Zap } from 'lucide-react'
+import { CheckCircle, ChevronRight, FileText, Search, UserPlus, Users, Zap } from 'lucide-react'
 
 import { useToast } from '@/components/ui/toast'
 import { getProviderPanelUrl, listCompatibleApps } from '@/lib/config/provider-catalog'
 import type { Cliente } from '@/lib/mock-data'
+import { parseProviderText } from '@/lib/services/credentials/parse-provider-text'
 import { OFFICIAL_PLANS, officialPlan, normalizeScreensCount, type ScreensCount } from '@/lib/services/official-plans'
 
 type Step = 'busca' | 'app_plano' | 'confirmar'
@@ -31,6 +32,7 @@ const APPS = [
   { id: 'xcloud', label: 'XCloud', color: '#14b8a6' },
   { id: 'blessed', label: 'Blessed Player', color: '#ef4444' },
   { id: 'playsim', label: 'PlaySim', color: '#f97316' },
+  { id: 'assist_plus', label: 'Assist+', color: '#22c55e' },
   { id: 'funplay', label: 'FunPlay', color: '#8b5cf6' },
   { id: 'magic_player', label: 'Magic Player', color: '#a855f7' },
   { id: 'xciptv', label: 'XCIPTV', color: '#06b6d4' },
@@ -73,6 +75,7 @@ export function AtivarClientesPage() {
   const [ativando, setAtivando] = useState(false)
   const [providerConfirmed, setProviderConfirmed] = useState(false)
   const [slotConfirmed, setSlotConfirmed] = useState(false)
+  const [providerText, setProviderText] = useState('')
   const { addToast } = useToast()
 
   useEffect(() => {
@@ -108,6 +111,7 @@ export function AtivarClientesPage() {
   const providerLookup = PANEL_PROVIDER_LOOKUP[panelKey] || panelKey
   const providerPanelUrl = getProviderPanelUrl(providerLookup)
   const compatibleApps = listCompatibleApps(providerLookup).slice(0, 8)
+  const parsedCredentials = useMemo(() => providerText.trim() ? parseProviderText(providerText) : null, [providerText])
 
   async function carregarRecomendacao(nextApp = appKey, nextPanel = panelKey): Promise<Recommendation | null> {
     setRecommendation(null)
@@ -153,6 +157,7 @@ export function AtivarClientesPage() {
     setRecommendationError('')
     setProviderConfirmed(false)
     setSlotConfirmed(false)
+    setProviderText('')
     setStep('app_plano')
   }
 
@@ -164,7 +169,18 @@ export function AtivarClientesPage() {
     setRecommendationError('')
     setProviderConfirmed(false)
     setSlotConfirmed(false)
+    setProviderText('')
     setStep('app_plano')
+  }
+
+  function atualizarTextoPainel(value: string) {
+    setProviderText(value)
+    const parsed = parseProviderText(value)
+    if (parsed.planKey) setPlanKey(parsed.planKey)
+    if (parsed.screensCount) setScreensCount(parsed.screensCount)
+    setRecommendation(null)
+    setRecommendationAttempted(false)
+    setSlotConfirmed(false)
   }
 
   async function confirmar() {
@@ -214,6 +230,18 @@ export function AtivarClientesPage() {
           account_id: recommendation?.account_id || undefined,
           slot_id: recommendation?.slot_id || undefined,
           slot_number: recommendation?.slot_number || undefined,
+          due_at: parsedCredentials?.dueAt || undefined,
+          credentials: parsedCredentials ? {
+            username: parsedCredentials.username,
+            password: parsedCredentials.password,
+            host: parsedCredentials.host,
+            due_at: parsedCredentials.dueAt,
+            provider_code: parsedCredentials.providerCode,
+            code: parsedCredentials.code,
+            panel_name: parsedCredentials.panelName,
+            app_name: parsedCredentials.appName,
+            raw_text: parsedCredentials.rawText,
+          } : undefined,
           operator_ref: 'painel_web',
         }),
       })
@@ -233,6 +261,10 @@ export function AtivarClientesPage() {
             plan: plano.displayLabel,
             amount: `R$ ${valorFinal.toFixed(2)}`,
             dueAt: data.activation?.due_at || '',
+            username: parsedCredentials?.username || data.activation?.credentials?.username || '',
+            password: parsedCredentials?.password || data.activation?.credentials?.password || '',
+            host: parsedCredentials?.host || data.activation?.credentials?.host || '',
+            code: parsedCredentials?.code || data.activation?.credentials?.code || '',
           },
           context: {
             source: 'painel1',
@@ -249,6 +281,7 @@ export function AtivarClientesPage() {
       setClienteSelecionado(null)
       setNovoCliente({ name: '', phone: '' })
       setRecommendation(null)
+      setProviderText('')
     } catch (err) {
       addToast('error', err instanceof Error ? err.message : 'Falha ao ativar cliente')
     } finally {
@@ -317,6 +350,40 @@ export function AtivarClientesPage() {
               </Panel>
               <Picker title="Aplicativo" items={APPS} value={appKey} onChange={(value) => { setAppKey(value); setProviderConfirmed(false); setSlotConfirmed(false); carregarRecomendacao(value, panelKey) }} />
               <Picker title="Painel gerador" items={PAINEIS.map(p => ({ ...p, color: '#60a5fa' }))} value={panelKey} onChange={(value) => { setPanelKey(value); setProviderConfirmed(false); setSlotConfirmed(false); carregarRecomendacao(appKey, value) }} />
+              <Panel title="Colar dados do painel">
+                <div className="space-y-3">
+                  <textarea
+                    value={providerText}
+                    onChange={(event) => atualizarTextoPainel(event.target.value)}
+                    placeholder="Cole aqui o texto completo do painel/provedor..."
+                    className="min-h-36 w-full resize-y rounded-xl px-3 py-3 text-sm text-white outline-none placeholder:text-slate-600"
+                    style={{ background: 'var(--input)', border: '1px solid var(--border)' }}
+                  />
+                  {parsedCredentials && (
+                    <div className="rounded-xl p-3" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)' }}>
+                      <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-slate-300">
+                        <FileText className="h-4 w-4" />
+                        Dados extraidos
+                      </div>
+                      <div className="grid gap-2 text-xs sm:grid-cols-2">
+                        <Extracted label="Usuario" value={parsedCredentials.username} />
+                        <Extracted label="Senha" value={parsedCredentials.password} />
+                        <Extracted label="Host/DNS" value={parsedCredentials.host} />
+                        <Extracted label="Vencimento" value={parsedCredentials.dueAtText} />
+                        <Extracted label="Provider" value={parsedCredentials.providerCode} />
+                        <Extracted label="Code" value={parsedCredentials.code} />
+                        <Extracted label="Painel provavel" value={parsedCredentials.panelName} />
+                        <Extracted label="App provavel" value={parsedCredentials.appName} />
+                        <Extracted label="Plano" value={parsedCredentials.planKey} />
+                        <Extracted label="Telas" value={parsedCredentials.screensCount ? String(parsedCredentials.screensCount) : ''} />
+                      </div>
+                      {parsedCredentials.warnings.length > 0 && (
+                        <p className="mt-2 text-[11px] text-amber-300">{parsedCredentials.warnings.join(' ')}</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </Panel>
               <Panel title="Catalogo do painel">
                 <div className="space-y-3">
                   <div className="flex flex-wrap gap-2">
@@ -387,7 +454,8 @@ export function AtivarClientesPage() {
                     )}
                     {recommendation.recommended && (
                       <div className="space-y-3">
-                        <p className="text-xs text-emerald-300">Existe uma tela livre em {recommendation.account_label}: {recommendation.slot_label}.</p>
+                        <p className="text-xs text-emerald-300">Existe tela livre nesta conta. Usar essa tela economiza crédito.</p>
+                        <p className="text-xs text-slate-500">{recommendation.account_label}: {recommendation.slot_label}</p>
                         <button
                           onClick={() => setSlotConfirmed((value) => !value)}
                           className="h-10 w-full rounded-xl text-xs font-semibold"
@@ -408,6 +476,17 @@ export function AtivarClientesPage() {
                   <p className="text-sm text-slate-500">A recomendacao sera buscada antes da ativacao.</p>
                 )}
               </Panel>
+              {parsedCredentials && (
+                <Panel title="Credenciais extraidas">
+                  <div className="grid gap-2 text-sm">
+                    <Row label="Usuario" value={parsedCredentials.username || '-'} />
+                    <Row label="Senha" value={parsedCredentials.password || '-'} />
+                    <Row label="Host/DNS" value={parsedCredentials.host || '-'} />
+                    <Row label="Provider/Code" value={parsedCredentials.providerCode || parsedCredentials.code || '-'} />
+                    <Row label="Vencimento colado" value={parsedCredentials.dueAtText || '-'} />
+                  </div>
+                </Panel>
+              )}
               <Panel title="Confirmacao no provedor">
                 <div className="space-y-3">
                   <p className="text-xs text-slate-500">Abra o painel correto, libere/renove o acesso no provedor e só depois confirme aqui para enviar a mensagem final.</p>
@@ -483,4 +562,13 @@ function Picker({ title, items, value, onChange }: { title: string; items: { id:
 
 function Row({ label, value }: { label: string; value: string }) {
   return <div className="flex items-center justify-between gap-3"><span className="text-slate-500">{label}</span><span className="font-semibold text-white">{value}</span></div>
+}
+
+function Extracted({ label, value }: { label: string; value?: string }) {
+  return (
+    <div className="flex min-w-0 items-center justify-between gap-2 rounded-lg px-2 py-1" style={{ background: 'rgba(255,255,255,0.025)' }}>
+      <span className="shrink-0 text-slate-500">{label}</span>
+      <span className="min-w-0 truncate font-semibold text-white">{value || '-'}</span>
+    </div>
+  )
 }
