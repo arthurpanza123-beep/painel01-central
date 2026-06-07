@@ -275,7 +275,7 @@ function CredenciaisModal({ conta, onClose }: { conta: Conta; onClose: () => voi
   return (
     <ModalShell onClose={onClose}>
       <div className="p-5 text-center" style={{ borderBottom: '1px solid var(--border)' }}>
-        <div className="h-14 w-14 rounded-full flex items-center justify-center mx-auto mb-3" style={{ background: 'rgba(167,139,250,0.12)', color: '#a78bfa' }}>
+        <div className="h-14 w-14 rounded-full flex items-center justify-center mx-auto mb-3" style={{ background: 'rgba(20,184,166,0.12)', color: '#14b8a6' }}>
           <KeyRound className="h-6 w-6" />
         </div>
         <h3 className="text-lg font-semibold text-white" style={{ fontFamily: 'var(--font-display)' }}>{conta.codigo}</h3>
@@ -431,7 +431,7 @@ export function ContasPage() {
         {/* Header */}
         <div className="text-center mb-8 max-w-xl">
           <div className="flex items-center justify-center gap-2 mb-3">
-            <Layers className="h-4 w-4" style={{ color: '#a78bfa' }} />
+            <Layers className="h-4 w-4" style={{ color: '#14b8a6' }} />
             <span className="text-xs text-slate-500 uppercase tracking-widest font-medium">Contas & Telas</span>
           </div>
           <h1 className="text-2xl font-bold text-white mb-2" style={{ fontFamily: 'var(--font-display)' }}>Contas</h1>
@@ -443,7 +443,7 @@ export function ContasPage() {
         {/* KPIs */}
         <div className="flex items-center gap-8 mb-8">
           {[
-            { label: 'Contas', value: metricas.totalContas, color: '#a78bfa' },
+            { label: 'Contas', value: metricas.totalContas, color: '#14b8a6' },
             { label: 'Com tela', value: metricas.contasComVaga, color: '#22c55e' },
             { label: 'Cheias', value: metricas.contasCompletas, color: '#f59e0b' },
             { label: 'Telas livres', value: metricas.vagasLivres, color: '#60a5fa' },

@@ -102,9 +102,9 @@ export function DebugPage() {
         <div className="flex items-center gap-3">
           <div 
             className="h-10 w-10 rounded-xl flex items-center justify-center"
-            style={{ background: 'rgba(167,139,250,0.1)', border: '1px solid rgba(167,139,250,0.2)' }}
+            style={{ background: 'rgba(20,184,166,0.1)', border: '1px solid rgba(20,184,166,0.2)' }}
           >
-            <Terminal className="h-5 w-5" style={{ color: '#a78bfa' }} />
+            <Terminal className="h-5 w-5" style={{ color: '#14b8a6' }} />
           </div>
           <div>
             <h1 className="text-lg font-semibold text-white">Logs</h1>
@@ -151,7 +151,7 @@ export function DebugPage() {
             className="px-3 h-7 rounded-lg text-[11px] font-medium transition-all flex items-center gap-1.5"
             style={
               filter === f.id
-                ? { background: 'rgba(167,139,250,0.15)', border: '1px solid rgba(167,139,250,0.25)', color: '#c4b5fd' }
+                ? { background: 'rgba(20,184,166,0.15)', border: '1px solid rgba(20,184,166,0.25)', color: '#5eead4' }
                 : { background: 'transparent', color: '#64748b' }
             }
           >

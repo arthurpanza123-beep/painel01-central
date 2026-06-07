@@ -56,7 +56,7 @@ function getDashboardFromMock(): DashboardMetrics {
     funnel: [
       { stage: 'novo_lead',    label: 'Leads',     count: pipe.novo_lead + pipe.contato,           color: '#3b82f6' },
       { stage: 'testando',     label: 'Testando',  count: pipe.teste_gerado + pipe.testando,        color: '#f59e0b' },
-      { stage: 'interessado',  label: 'Interesse', count: pipe.interessado,                         color: '#a78bfa' },
+      { stage: 'interessado',  label: 'Interesse', count: pipe.interessado,                         color: '#60a5fa' },
       { stage: 'pagou',        label: 'Pagaram',   count: pipe.pagou,                               color: '#22c55e' },
       { stage: 'ativado',      label: 'Ativados',  count: pipe.ativado,                             color: '#14b8a6' },
     ],
@@ -238,7 +238,7 @@ async function getDashboardFromSupabase(): Promise<DashboardMetrics | null> {
       revenue_forecast_90d: sumCents(forecast90Res.data),
       funnel: [
         { stage: 'novo_lead', label: 'Lead', count: leads, color: '#3b82f6' },
-        { stage: 'contato', label: 'Baixando app', count: 0, color: '#6366f1' },
+        { stage: 'contato', label: 'Baixando app', count: 0, color: '#38bdf8' },
         { stage: 'teste_gerado', label: 'Testando', count: testing, color: '#f59e0b' },
         { stage: 'testando', label: 'Finalizou', count: finished, color: '#eab308' },
         { stage: 'pagou', label: 'Pagou', count: paidPipeline, color: '#22c55e' },

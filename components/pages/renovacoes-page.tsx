@@ -138,7 +138,7 @@ export function RenovacoesPage() {
             <div key={grupo.id}>
               <div className="flex items-center justify-between mb-3 px-1">
                 <div className="flex items-center gap-2">
-                  <span className="h-2 w-2 rounded-full" style={{ background: grupo.color, boxShadow: `0 0 8px ${grupo.color}` }} />
+                  <span className="h-2 w-2 rounded-full" style={{ background: grupo.color }} />
                   <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: grupo.color }}>
                     {grupo.label}
                   </span>

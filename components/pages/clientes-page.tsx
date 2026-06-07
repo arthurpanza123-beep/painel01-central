@@ -369,7 +369,7 @@ export function ClientesPage() {
     { label: 'Codex IA', icon: Sparkles, onClick: () => {
       navigator.clipboard.writeText(`Cliente: ${c.nome}\nTelefone: ${c.telefone}\nApp: ${c.app}\nServidor: ${c.servidor}\nPlano: ${c.plano}\nVencimento: ${c.vencimento}\n\nProblema/Pergunta:`)
       addToast('success', 'Contexto copiado para Codex IA')
-    }, color: '#a78bfa' },
+    }, color: '#14b8a6' },
     { label: 'Ver dados', icon: Eye, onClick: () => setSelecionado(c) },
   ]
 
