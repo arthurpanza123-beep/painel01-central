@@ -273,9 +273,11 @@ function MobileNav({ open, activePage, onClose, onNavigate, settings, busy, onTo
             initial={{ y: 24, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 24, opacity: 0 }}
-            className="absolute bottom-0 left-0 right-0 max-h-[86vh] overflow-y-auto rounded-t-2xl p-4"
+            className="fixed bottom-0 left-0 right-0 w-full max-h-[86vh] overflow-y-auto rounded-t-2xl p-4"
             style={{
               paddingBottom: 'calc(16px + env(safe-area-inset-bottom))',
+              paddingLeft: 'calc(16px + env(safe-area-inset-left))',
+              paddingRight: 'calc(16px + env(safe-area-inset-right))',
               background: 'var(--background)',
               borderTop: '1px solid var(--border)',
               boxShadow: '0 -12px 34px rgba(0,0,0,0.44)',
