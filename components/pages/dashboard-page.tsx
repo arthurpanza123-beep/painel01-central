@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { m as motion } from 'framer-motion'
 import {
   TestTube2, Users, ClipboardList, Zap,
-  Activity, TrendingUp, Eye
+  Activity, TrendingUp, Wallet, ArrowUpRight,
 } from 'lucide-react'
 import type { NavPage } from '@/app/page'
 // MOCK: importação direta dos mocks — usada como fallback quando metrics não é passado
@@ -59,6 +59,10 @@ export function DashboardPage({ onNavigate, metrics }: DashboardPageProps) {
   const ativadosHoje = dashboardMetrics?.activated_today
     ?? MOCK_CLIENTES.filter(c => c.criadoEm === hojeBR).length
 
+  // Faturado hoje = soma dos pagamentos confirmados (leads que pagaram)
+  const faturadoHoje = dashboardMetrics?.revenue_today
+    ?? MOCK_PIPELINE.filter(l => l.etapa === 'pagou').reduce((acc, l) => acc + (l.valor ?? 0), 0)
+
   const kpis = [
     { label: 'Testes ativos hoje', value: testesAtivos,   icon: TestTube2,     color: '#3b82f6', page: 'testes'   as NavPage },
     { label: 'Operação hoje',      value: operacaoHoje,   icon: ClipboardList, color: '#f59e0b', page: 'pipeline' as NavPage },
@@ -110,6 +114,29 @@ export function DashboardPage({ onNavigate, metrics }: DashboardPageProps) {
           ))}
         </div>
 
+        {/* Faturado hoje — mini card horizontal */}
+        <motion.button
+          onClick={() => onNavigate('financeiro')}
+          initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.18 }}
+          whileHover={{ y: -2 }}
+          className="w-full flex items-center gap-3 rounded-2xl p-4 mb-3 sm:mb-4 text-left"
+          style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
+        >
+          <div
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
+            style={{ background: 'rgba(34,197,94,0.14)', border: '1px solid rgba(34,197,94,0.3)' }}
+          >
+            <Wallet className="h-5 w-5" style={{ color: '#22c55e' }} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs text-slate-500">Faturado hoje</p>
+            <p className="text-xl sm:text-2xl font-bold text-white leading-tight" style={{ fontFamily: 'var(--font-display)' }}>
+              R$ {Math.round(faturadoHoje).toLocaleString('pt-BR')}
+            </p>
+          </div>
+          <ArrowUpRight className="h-4 w-4 text-slate-500 shrink-0" />
+        </motion.button>
+
         {/* Projeção de renovação */}
         <RenovacaoProjecao base={renovacaoBase} onNavigate={onNavigate} />
       </div>
@@ -147,9 +174,8 @@ function RenovacaoProjecao({ base, onNavigate }: { base: number; onNavigate: (p:
             <TrendingUp className="h-4 w-4" style={{ color: '#22c55e' }} />
             <p className="text-sm font-semibold text-white">Projeção de renovação</p>
           </div>
-          <p className="text-xs text-slate-500 flex items-center gap-1">
-            <Eye className="h-3 w-3" />
-            Passe o mouse ou toque em um período para ver o valor
+          <p className="text-xs text-slate-500">
+            Estimativa por período · toque para destacar
           </p>
         </div>
         <button
@@ -173,33 +199,31 @@ function RenovacaoProjecao({ base, onNavigate }: { base: number; onNavigate: (p:
               onMouseEnter={() => setAtivo(i)}
               onMouseLeave={() => setAtivo(prev => (prev === i ? null : prev))}
               onClick={() => setAtivo(prev => (prev === i ? null : i))}
-              className="flex flex-col items-center justify-end gap-2 group focus:outline-none"
+              className="flex flex-col items-center justify-end gap-2 focus:outline-none"
               aria-label={`${p.label}: ${fmt(valor)}`}
             >
-              <span
-                className={`text-[10px] sm:text-xs font-bold whitespace-nowrap transition-all duration-200 ${
-                  revelado ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-1'
-                }`}
-                style={{ color: '#4ade80' }}
+              <motion.span
+                animate={revelado ? { scale: 1.12, y: -1 } : { scale: 1, y: 0 }}
+                transition={{ type: 'spring', stiffness: 400, damping: 18 }}
+                className="text-[10px] sm:text-xs font-bold whitespace-nowrap origin-bottom"
+                style={{ color: revelado ? '#4ade80' : '#94a3b8' }}
               >
                 {fmt(valor)}
-              </span>
-              <div
-                className="w-full rounded-t-lg transition-all duration-200"
+              </motion.span>
+              <motion.div
+                animate={revelado
+                  ? { height: altura + 10, scaleX: 1.04 }
+                  : { height: altura, scaleX: 1 }}
+                transition={{ type: 'spring', stiffness: 320, damping: 22 }}
+                className="w-full rounded-t-lg origin-bottom"
                 style={{
-                  height: altura,
                   background: revelado
-                    ? 'linear-gradient(180deg, #22c55e, rgba(34,197,94,0.35))'
-                    : 'linear-gradient(180deg, rgba(34,197,94,0.45), rgba(34,197,94,0.08))',
+                    ? 'linear-gradient(180deg, #22c55e, rgba(34,197,94,0.4))'
+                    : 'linear-gradient(180deg, rgba(34,197,94,0.5), rgba(34,197,94,0.1))',
                   border: revelado ? '1px solid rgba(34,197,94,0.6)' : '1px solid transparent',
+                  boxShadow: revelado ? '0 0 16px rgba(34,197,94,0.35)' : 'none',
                 }}
-              >
-                {!revelado && (
-                  <span className="flex items-center justify-center h-full text-xs font-bold text-slate-500">
-                    •••
-                  </span>
-                )}
-              </div>
+              />
               <span className={`text-[10px] sm:text-xs transition-colors ${revelado ? 'text-white' : 'text-slate-500'}`}>
                 {p.label}
               </span>
