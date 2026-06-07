@@ -70,6 +70,27 @@ const STATUS: Record<StatusTeste, { label: string; color: string }> = {
   sem_resposta: { label: 'Aguardando', color: '#f59e0b' },
 }
 
+// Janela em que um teste expirado continua visível antes de sumir da lista
+const JANELA_EXPIRADO_MS = 10 * 60 * 1000
+
+function parseValidade(raw: string): number {
+  const direct = new Date(raw)
+  if (!Number.isNaN(direct.getTime())) return direct.getTime()
+  const parts = raw.split(' ')
+  const d = parts[0].split('/')
+  const t = parts[1] ? parts[1].split(':') : ['23', '59']
+  return new Date(Number(d[2]), Number(d[1]) - 1, Number(d[0]), Number(t[0]), Number(t[1])).getTime()
+}
+
+// Só permanecem visíveis: quem está em teste (countdown rodando) ou expirou nos últimos 10 min
+function testeVisivel(teste: Teste, now: number): boolean {
+  if (teste.status === 'pago') return false // convertido -> virou cliente, sai da lista
+  const exp = parseValidade(teste.expiresAt || teste.validade)
+  if (Number.isNaN(exp)) return teste.status === 'ativo' || teste.status === 'sem_resposta'
+  if (exp > now) return true // ainda em teste
+  return now - exp <= JANELA_EXPIRADO_MS // expirou nos últimos 10 min
+}
+
 // ——— Card de teste focado em countdown ———
 function TesteCard({
   teste, onVerDetalhes, onAtivar, onAbrirPainel, onExpirar, onCopiarUsuario, isExpiring, highlighted,
@@ -305,13 +326,21 @@ export function TestesPage() {
     return () => { alive = false }
   }, [])
 
+  // Relógio que avança para remover testes expirados há mais de 10 min, sem refresh manual
+  const [agora, setAgora] = useState(() => Date.now())
+  useEffect(() => {
+    const id = setInterval(() => setAgora(Date.now()), 30000)
+    return () => clearInterval(id)
+  }, [])
+
+  const testesVisiveis = testes.filter(t => testeVisivel(t, agora))
+
   const metricas = {
-    testesAtivos: testes.filter(t => t.status === 'ativo').length,
-    testesExpirados: testes.filter(t => t.status === 'expirado').length,
-    testesConvertidos: testes.filter(t => t.status === 'pago').length,
+    testesAtivos: testesVisiveis.filter(t => parseValidade(t.expiresAt || t.validade) > agora).length,
+    testesExpirados: testesVisiveis.filter(t => parseValidade(t.expiresAt || t.validade) <= agora).length,
   }
 
-  const testesFiltrados = testes.filter(t => {
+  const testesFiltrados = testesVisiveis.filter(t => {
     const matchSearch =
       t.id.toLowerCase().includes(search.toLowerCase()) ||
       t.cliente.toLowerCase().includes(search.toLowerCase()) ||
@@ -429,10 +458,9 @@ export function TestesPage() {
         </h1>
         <p className="text-slate-500 text-sm">
           {metricas.testesAtivos} testando
-          {metricas.testesExpirados > 0 && ` · ${metricas.testesExpirados} expirados`}
-          {metricas.testesConvertidos > 0 && ` · ${metricas.testesConvertidos} convertidos`}
+          {metricas.testesExpirados > 0 && ` · ${metricas.testesExpirados} saindo da lista`}
 	        </p>
-	        <p className="text-[11px] text-slate-600 mt-1">Os testes encerram automaticamente: 45 min em horário de jogo ou 1h15 no modo normal.</p>
+	        <p className="text-[11px] text-slate-600 mt-1">Aparece só quem está em teste; ao expirar, o teste fica 10 min na lista e some. Encerram sozinhos: 45 min em horário de jogo ou 1h15 no modo normal.</p>
 	        {selectedLinkTestId && (
 	          <p className="mt-2 inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-medium"
 	             style={{ background: 'rgba(96,165,250,0.12)', color: '#93c5fd', border: '1px solid rgba(96,165,250,0.18)' }}>
@@ -445,8 +473,7 @@ export function TestesPage() {
       <div className="flex items-center gap-4 sm:gap-8 mb-8">
         {[
           { label: 'Testando', value: metricas.testesAtivos, color: '#22c55e' },
-          { label: 'Expirados', value: metricas.testesExpirados, color: '#ef4444' },
-          { label: 'Convertidos', value: metricas.testesConvertidos, color: '#3b82f6' },
+          { label: 'Saindo (10 min)', value: metricas.testesExpirados, color: '#ef4444' },
         ].map(({ label, value, color }) => (
           <div key={label} className="text-center">
             <p className="text-xl font-bold" style={{ color, fontFamily: 'var(--font-display)' }}>{value}</p>
@@ -484,7 +511,7 @@ export function TestesPage() {
             />
           </div>
           <div className="flex gap-1.5 flex-wrap lg:shrink-0">
-            {(['todos', 'ativo', 'sem_resposta', 'expirado', 'pago'] as const).map((s) => (
+            {(['todos', 'ativo', 'sem_resposta', 'expirado'] as const).map((s) => (
               <button
                 key={s}
                 onClick={() => setStatusFilter(s)}

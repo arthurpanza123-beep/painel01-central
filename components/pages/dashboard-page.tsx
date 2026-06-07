@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { m as motion } from 'framer-motion'
 import {
-  TestTube2, Users, ClipboardList, Wallet, Zap,
+  TestTube2, Users, ClipboardList, Zap,
   ArrowUpRight, Activity, Clock
 } from 'lucide-react'
 import type { NavPage } from '@/app/page'
@@ -11,7 +11,7 @@ import type { NavPage } from '@/app/page'
 // MIGRAÇÃO FUTURA: remover estas importações quando getDashboardData() for chamado
 //   no Server Component pai (app/page.tsx) e os dados forem passados via props.
 import {
-  MOCK_TESTES, MOCK_CLIENTES, MOCK_PIPELINE, MOCK_CREDITOS,
+  MOCK_TESTES, MOCK_CLIENTES, MOCK_PIPELINE,
   calcularMetricasFinanceiro, calcularMetricasPipeline,
 } from '@/lib/mock-data'
 import type { DashboardMetrics } from '@/lib/supabase/types'
@@ -54,8 +54,12 @@ export function DashboardPage({ onNavigate, metrics }: DashboardPageProps) {
   const testesHoje     = dashboardMetrics?.total_tests         ?? MOCK_TESTES.length
   const operacaoHoje   = dashboardMetrics?.leads_in_progress   ?? MOCK_PIPELINE.filter(l => l.etapa !== 'ativado' && l.etapa !== 'renovacao').length
   const clientesAtivos = dashboardMetrics?.active_clients      ?? MOCK_CLIENTES.filter(c => c.status === 'ativo').length
-  const creditos       = dashboardMetrics?.available_credits   ?? fin.creditosDisponiveis
   const receitaPrevista = dashboardMetrics?.monthly_renewal_forecast ?? dashboardMetrics?.revenue_forecast_30d ?? fin.receitaPrevista30d
+
+  // Ambientes ativados hoje (clientes ativados na data de hoje)
+  const hojeBR = new Date().toLocaleDateString('pt-BR')
+  const ativadosHoje = dashboardMetrics?.activated_today
+    ?? MOCK_CLIENTES.filter(c => c.criadoEm === hojeBR).length
 
   const serie = [
     { label: 'Hoje', value: dashboardMetrics?.revenue_current_month  ?? fin.receitaMesAtual },
@@ -76,16 +80,11 @@ export function DashboardPage({ onNavigate, metrics }: DashboardPageProps) {
         { label: 'Ativados',  value: pipe.ativado,                      color: '#14b8a6' },
       ]
 
-  // MOCK: créditos vêm do mock ou de metrics.panel_credits
-  const painelCreditos = dashboardMetrics?.panel_credits
-    ? dashboardMetrics.panel_credits.map(c => ({ id: c.id, painel: c.panel, saldo: c.balance, alertaBaixo: c.low_balance }))
-    : MOCK_CREDITOS
-
   const kpis = [
-    { label: 'Testes ativos',      value: testesAtivos,   icon: TestTube2, color: '#3b82f6', page: 'testes'   as NavPage },
-    { label: 'Testes hoje',        value: testesHoje,     icon: Zap,       color: '#f59e0b', page: 'testes'   as NavPage },
-    { label: 'Leads no funil',     value: operacaoHoje,   icon: ClipboardList, color: '#14b8a6', page: 'pipeline' as NavPage },
-    { label: 'Clientes ativos',    value: clientesAtivos, icon: Users,     color: '#22c55e', page: 'clientes' as NavPage },
+    { label: 'Testes ativos hoje', value: testesAtivos,   icon: TestTube2,     color: '#3b82f6', page: 'testes'   as NavPage },
+    { label: 'Operação hoje',      value: operacaoHoje,   icon: ClipboardList, color: '#f59e0b', page: 'pipeline' as NavPage },
+    { label: 'Clientes ativos',    value: clientesAtivos, icon: Users,         color: '#22c55e', page: 'clientes' as NavPage },
+    { label: 'Ativados hoje',      value: ativadosHoje,   icon: Zap,           color: '#14b8a6', page: 'clientes' as NavPage },
   ]
 
   return (
@@ -132,11 +131,11 @@ export function DashboardPage({ onNavigate, metrics }: DashboardPageProps) {
           ))}
         </div>
 
-        {/* Receita + créditos */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 mb-4">
+        {/* Renovação mensal prevista */}
+        <div className="grid grid-cols-1 gap-3 mb-4">
           <motion.div
             initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
-            className="lg:col-span-2 rounded-2xl p-6 relative overflow-hidden"
+            className="rounded-2xl p-6 relative overflow-hidden"
             style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
           >
             <div className="relative flex items-start justify-between mb-5">
@@ -182,34 +181,6 @@ export function DashboardPage({ onNavigate, metrics }: DashboardPageProps) {
               ))}
             </div>
           </motion.div>
-
-          <motion.button
-            onClick={() => onNavigate('financeiro')}
-            initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }}
-            className="text-left rounded-2xl p-6 relative overflow-hidden"
-            style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
-          >
-            <div className="flex items-center gap-2 mb-4">
-              <Wallet className="h-4 w-4" style={{ color: '#14b8a6' }} />
-              <span className="text-xs text-slate-500">Créditos disponíveis</span>
-            </div>
-            <p className="text-3xl font-bold text-white mb-4" style={{ fontFamily: 'var(--font-display)' }}>
-              {creditos.toFixed(0)}
-            </p>
-            <div className="space-y-2.5">
-              {painelCreditos.slice(0, 4).map(c => (
-                <div key={c.id} className="flex items-center justify-between">
-                  <span className="text-xs text-slate-400 flex items-center gap-1.5">
-                    {c.alertaBaixo && <span className="h-1.5 w-1.5 rounded-full" style={{ background: '#f59e0b' }} />}
-                    {c.painel}
-                  </span>
-                  <span className="text-xs font-medium" style={{ color: c.alertaBaixo ? '#f59e0b' : '#94a3b8' }}>
-                    {c.saldo.toFixed(0)}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </motion.button>
         </div>
 
         {/* Funil */}
