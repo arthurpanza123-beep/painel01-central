@@ -63,17 +63,13 @@ export function PipelinePage() {
           <div className="flex items-center gap-3">
             <div
               className="flex h-11 w-11 items-center justify-center rounded-xl"
-              style={{ background: 'rgba(167,139,250,0.12)', border: '1px solid rgba(167,139,250,0.25)' }}
+              style={{ background: 'rgba(59,130,246,0.12)', border: '1px solid rgba(59,130,246,0.25)' }}
             >
-              <Kanban className="h-5 w-5" style={{ color: '#a78bfa' }} />
+              <Kanban className="h-5 w-5" style={{ color: '#60a5fa' }} />
             </div>
             <div>
               <h1 className="text-xl font-bold text-white" style={{ fontFamily: 'var(--font-display)' }}>Pipeline</h1>
-              <p className="text-xs text-slate-500">{totalDia} leads no funil · clique para detalhes</p>
-              <p className="mt-1 inline-flex items-center gap-2 rounded-full px-2.5 py-0.5 text-[10px] font-medium"
-                 style={{ background: dataSource === 'supabase' ? 'rgba(34,197,94,0.12)' : 'rgba(245,158,11,0.12)', color: dataSource === 'supabase' ? '#4ade80' : '#fbbf24' }}>
-                Fonte: {dataSource === 'supabase' ? 'Supabase' : 'Mock'}
-              </p>
+              <p className="text-xs text-slate-500">{totalDia} leads nas últimas 24h · clique para detalhes</p>
             </div>
           </div>
         </div>

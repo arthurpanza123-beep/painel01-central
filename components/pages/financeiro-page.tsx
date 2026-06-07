@@ -220,10 +220,6 @@ export function FinanceiroPage() {
         </div>
         <h1 className="text-3xl font-bold text-white mb-2" style={{ fontFamily: 'var(--font-display)' }}>Financeiro</h1>
         <p className="text-slate-500">Receita, conversões e saúde dos painéis</p>
-        <p className="mt-2 inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-medium"
-           style={{ background: finance.data_source === 'supabase' ? 'rgba(34,197,94,0.12)' : 'rgba(245,158,11,0.12)', color: finance.data_source === 'supabase' ? '#4ade80' : '#fbbf24' }}>
-          Fonte: {finance.data_source === 'supabase' ? 'Supabase' : 'Mock'}
-        </p>
       </motion.div>
 
       {/* KPIs grandes */}

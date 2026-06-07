@@ -320,10 +320,6 @@ export function ProblemasPage() {
           <p className="text-slate-500 text-sm">
             {metricas.abertos} abertos · {metricas.emAnalise} em analise · {metricas.resolvidos} resolvidos
           </p>
-          <p className="mt-2 inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-medium"
-             style={{ background: dataSource === 'supabase' ? 'rgba(34,197,94,0.12)' : 'rgba(245,158,11,0.12)', color: dataSource === 'supabase' ? '#4ade80' : '#fbbf24' }}>
-            Fonte: {dataSource === 'supabase' ? 'Supabase' : 'Mock'}
-          </p>
         </div>
 
         {/* KPIs */}
