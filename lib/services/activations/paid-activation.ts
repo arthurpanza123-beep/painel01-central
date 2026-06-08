@@ -46,6 +46,10 @@ type ActivationInput = {
     username?: string
     password?: string
     host?: string
+    dns?: string
+    smart_tv_dns?: string
+    web_player?: string
+    checkout_url?: string
     due_at?: string
     provider_code?: string
     code?: string
@@ -94,6 +98,7 @@ type AccountRow = {
   max_slots: number | null
   status: string | null
   expires_at: string | null
+  legacy_metadata?: JsonRecord | null
 }
 
 type SlotRow = {
@@ -286,6 +291,31 @@ function safeMessage(message: string): string {
   return maskSensitiveText(message).slice(0, 800)
 }
 
+const ACCESS_CREDENTIALS_NOT_FOUND_MESSAGE = 'Usuário e senha não foram encontrados no texto colado. Cole novamente os dados completos do painel antes de enviar ao cliente.'
+const MASKED_CREDENTIAL_RE = /^(?:\*+|x{3,}|X{3,}|-+|_+|•+|●+)$/
+
+function cleanCredential(value: unknown): string {
+  return String(value || '')
+    .trim()
+    .replace(/^[*_`"'\s]+/g, '')
+    .replace(/[*_`"',.;\s]+$/g, '')
+    .trim()
+}
+
+function isInvalidCredential(value: unknown): boolean {
+  const text = cleanCredential(value)
+  return !text || /^(?:null|undefined)$/i.test(text) || MASKED_CREDENTIAL_RE.test(text)
+}
+
+function metadataString(metadata: JsonRecord | null | undefined, key: string): string {
+  const value = metadata && typeof metadata === 'object' && !Array.isArray(metadata) ? metadata[key] : undefined
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function isApp(context: ActivationContext, pattern: RegExp): boolean {
+  return pattern.test(`${context.app.key} ${context.app.name}`.toLowerCase())
+}
+
 async function writeLog(event: string, level: 'info' | 'warning' | 'error' | 'success', payload: {
   client_id?: string | null
   test_id?: string | null
@@ -440,7 +470,7 @@ async function findFreeSlot(appId: string, panelId?: string | null, requested?: 
 
   let query = database
     .from('accounts')
-    .select('id,app_id,panel_id,username,password_secret,device_key,provider,provider_code,panel_external_id,max_slots,status,expires_at')
+    .select('id,app_id,panel_id,username,password_secret,device_key,provider,provider_code,panel_external_id,max_slots,status,expires_at,legacy_metadata')
     .eq('app_id', appId)
     .eq('status', 'active')
     .order('created_at', { ascending: true })
@@ -520,7 +550,7 @@ async function createConfirmedNewAccount(context: ActivationContext, input: Acti
 
   const username = String(input.new_account?.username || '').trim()
   const password = String(input.new_account?.password_secret || '').trim()
-  if (!username || !password) {
+  if (isInvalidCredential(username) || isInvalidCredential(password)) {
     throw new ActivationError(400, 'NEW_ACCOUNT_CREDENTIALS_REQUIRED', 'Para criar nova conta, informe usuario e senha da conta paga.')
   }
 
@@ -552,7 +582,7 @@ async function createConfirmedNewAccount(context: ActivationContext, input: Acti
         test_id: context.test?.id || null,
       },
     })
-    .select('id,app_id,panel_id,username,password_secret,device_key,provider,provider_code,panel_external_id,max_slots,status,expires_at')
+    .select('id,app_id,panel_id,username,password_secret,device_key,provider,provider_code,panel_external_id,max_slots,status,expires_at,legacy_metadata')
     .single()
 
   if (accountError) throw new ActivationError(500, 'ACCOUNT_CREATE_FAILED', accountError.message)
@@ -587,17 +617,72 @@ async function createConfirmedNewAccount(context: ActivationContext, input: Acti
   return { account, slot, slots: createdSlots.slice(0, context.screens_count), capacity }
 }
 
-function activationCredentials(context: ActivationContext, input: ActivationInput, account: AccountRow) {
+function activationCredentials(context: ActivationContext, input: ActivationInput, account: AccountRow, requirePastedValues = false) {
   const source = input.credentials || {}
+  const accountMetadata = account.legacy_metadata || {}
+  const sourceOrFallback = (sourceValue: unknown, fallbackValue: unknown) => {
+    const value = cleanCredential(sourceValue)
+    if (value) return value
+    if (requirePastedValues) return undefined
+    const fallback = cleanCredential(fallbackValue)
+    return fallback || undefined
+  }
+
   return {
-    username: source.username || account.username || undefined,
-    password: source.password || account.password_secret || undefined,
-    host: source.host || undefined,
-    provider_code: source.provider_code || account.provider_code || undefined,
-    code: source.code || undefined,
+    username: sourceOrFallback(source.username, account.username),
+    password: sourceOrFallback(source.password, account.password_secret),
+    host: sourceOrFallback(source.host, metadataString(accountMetadata, 'host') || metadataString(accountMetadata, 'xtream_host')),
+    dns: sourceOrFallback(source.dns || source.smart_tv_dns, metadataString(accountMetadata, 'dns') || metadataString(accountMetadata, 'smart_tv_dns')),
+    smart_tv_dns: sourceOrFallback(source.smart_tv_dns, metadataString(accountMetadata, 'smart_tv_dns')),
+    web_player: source.web_player || metadataString(accountMetadata, 'web_player') || undefined,
+    checkout_url: source.checkout_url || metadataString(accountMetadata, 'checkout_url') || undefined,
+    provider_code: sourceOrFallback(source.provider_code, account.provider_code),
+    code: sourceOrFallback(source.code, account.provider_code),
     device_key: account.device_key || undefined,
     app: source.app_name || context.app.name,
     panel: source.panel_name || context.panel?.name || undefined,
+  }
+}
+
+function assertActivationCredentials(context: ActivationContext, input: ActivationInput, account: AccountRow) {
+  const requirePastedValues = Boolean(input.credentials?.raw_text)
+  const credentials = activationCredentials(context, input, account, requirePastedValues)
+  const common = [
+    { key: 'username', value: credentials.username },
+    { key: 'password', value: credentials.password },
+  ]
+  const requirements = isApp(context, /blessed/)
+    ? [{ key: 'provider', value: credentials.provider_code }, ...common]
+    : isApp(context, /playsim|play_sim|assist/)
+      ? [{ key: 'code', value: credentials.code || credentials.provider_code }, ...common]
+      : isApp(context, /xcloud|x\s*cloud/)
+        ? [{ key: 'host', value: credentials.host }, ...common]
+        : isApp(context, /smart_stb|smart\s*(stb|up)/)
+          ? [{ key: 'dns', value: credentials.smart_tv_dns || credentials.dns || credentials.host }, ...common]
+          : common
+
+  const missing = requirements.filter((item) => isInvalidCredential(item.value))
+  if (missing.length) {
+    throw new ActivationError(400, 'ACCESS_CREDENTIALS_INCOMPLETE', ACCESS_CREDENTIALS_NOT_FOUND_MESSAGE)
+  }
+
+  return credentials
+}
+
+function activationCredentialMetadata(input: ActivationInput, credentials: ReturnType<typeof activationCredentials>): JsonRecord {
+  const source = input.credentials || {}
+  return {
+    source: source.raw_text ? 'pasted_provider_text' : 'account',
+    host: credentials.host || null,
+    dns: credentials.dns || null,
+    smart_tv_dns: credentials.smart_tv_dns || null,
+    web_player: credentials.web_player || null,
+    checkout_url: credentials.checkout_url || null,
+    provider_code: credentials.provider_code || null,
+    code: credentials.code || null,
+    panel_name: credentials.panel || null,
+    app_name: credentials.app || null,
+    pasted_text_present: Boolean(source.raw_text),
   }
 }
 
@@ -805,6 +890,8 @@ export async function activatePaidClient(input: ActivationInput) {
     }
 
     const { account, slot, slots } = requestedSlot
+    const credentials = assertActivationCredentials(context, input, account)
+    const credentialMetadata = activationCredentialMetadata(input, credentials)
     const now = new Date().toISOString()
     const occupiedSlots: SlotRow[] = []
 
@@ -824,6 +911,7 @@ export async function activatePaidClient(input: ActivationInput) {
             panel_id: context.panel?.id || null,
             plan_key: context.plan_key,
             screens_count: context.screens_count,
+            credentials: credentialMetadata,
           },
         })
         .eq('id', selectedSlot.id)
@@ -849,6 +937,19 @@ export async function activatePaidClient(input: ActivationInput) {
     }
 
     touched.account_id = account.id
+
+    const accountMetadata = {
+      ...(account.legacy_metadata || {}),
+      paid_activation_credentials: credentialMetadata,
+      paid_activation_credentials_updated_at: now,
+    }
+    const { error: accountMetadataError } = await database
+      .from('accounts')
+      .update({ legacy_metadata: accountMetadata })
+      .eq('id', account.id)
+
+    if (accountMetadataError) throw new ActivationError(500, 'ACCOUNT_METADATA_UPDATE_FAILED', accountMetadataError.message)
+    account.legacy_metadata = accountMetadata
 
     await writeLog('ACCOUNT_SLOT_USED', 'success', {
       client_id: context.client.id,
@@ -876,6 +977,7 @@ export async function activatePaidClient(input: ActivationInput) {
           active_slot_ids: occupiedSlots.map((item) => item.id),
           screens_count: context.screens_count,
           paid_activation_at: now,
+          paid_activation_credentials: credentialMetadata,
         },
       })
       .eq('id', context.client.id)
@@ -941,6 +1043,7 @@ export async function activatePaidClient(input: ActivationInput) {
           panel_id: context.panel?.id || null,
           screens_count: context.screens_count,
           slot_ids: occupiedSlots.map((item) => item.id),
+          credentials: credentialMetadata,
         },
       })
       .select('id,due_at,plan_key,amount_cents,status')
@@ -992,8 +1095,6 @@ export async function activatePaidClient(input: ActivationInput) {
         pasted_credentials: Boolean(input.credentials?.raw_text),
       },
     })
-
-    const credentials = activationCredentials(context, input, account)
 
     return {
       success: true,

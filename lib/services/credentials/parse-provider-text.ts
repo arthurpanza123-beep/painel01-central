@@ -3,10 +3,14 @@ export type ParsedProviderCredentials = {
   username?: string
   password?: string
   host?: string
+  smartTvDns?: string
+  webPlayer?: string
+  checkoutUrl?: string
   dueAt?: string
   dueAtText?: string
   providerCode?: string
   code?: string
+  rp725Code?: string
   panelName?: string
   panelKey?: string
   appName?: string
@@ -18,12 +22,54 @@ export type ParsedProviderCredentials = {
   warnings: string[]
 }
 
-function firstMatch(text: string, patterns: RegExp[]): string {
-  for (const pattern of patterns) {
-    const match = text.match(pattern)
-    if (match?.[1]) return match[1].trim()
+const MASKED_VALUE_RE = /^(?:\*+|x{3,}|X{3,}|-+|_+|•+|●+)$/
+
+function cleanValue(value: unknown): string {
+  return String(value || '')
+    .trim()
+    .replace(/^[*_`"'\s]+/g, '')
+    .replace(/[*_`"',.;\s]+$/g, '')
+    .trim()
+}
+
+function validValue(value: unknown): string {
+  const text = cleanValue(value)
+  if (!text) return ''
+  if (/^(?:null|undefined)$/i.test(text)) return ''
+  if (MASKED_VALUE_RE.test(text)) return ''
+  return text
+}
+
+function cleanUrl(value: unknown): string {
+  return cleanValue(value).replace(/[)\]}]+$/g, '')
+}
+
+function urlsFromText(text: string): string[] {
+  return (text.match(/https?:\/\/[^\s*]+/gi) || []).map(cleanUrl).filter(Boolean)
+}
+
+function lineValue(lines: string[], label: RegExp, options: { skip?: RegExp } = {}): string {
+  for (const line of lines) {
+    const normalized = normalizeText(line)
+    if (options.skip?.test(normalized)) continue
+    const match = line.match(label)
+    if (match?.[1]) {
+      const value = validValue(match[1])
+      if (value) return value
+    }
   }
   return ''
+}
+
+function hasMaskedLineValue(lines: string[], label: RegExp, options: { skip?: RegExp } = {}): boolean {
+  for (const line of lines) {
+    const normalized = normalizeText(line)
+    if (options.skip?.test(normalized)) continue
+    const match = line.match(label)
+    if (!match) continue
+    if (!validValue(match[1] || '')) return true
+  }
+  return false
 }
 
 function normalizeText(value: string) {
@@ -33,17 +79,76 @@ function normalizeText(value: string) {
     .toLowerCase()
 }
 
-function parseBRDate(value: string): string | undefined {
+function parseBRDateSaoPaulo(value: string): string | undefined {
   const match = value.match(/(\d{2})\/(\d{2})\/(\d{4})(?:\s+(\d{2}):(\d{2})(?::(\d{2}))?)?/)
   if (!match) return undefined
   const [, dd, mm, yyyy, hh = '23', min = '59', ss = '59'] = match
-  const date = new Date(Number(yyyy), Number(mm) - 1, Number(dd), Number(hh), Number(min), Number(ss))
+  const date = new Date(Date.UTC(Number(yyyy), Number(mm) - 1, Number(dd), Number(hh) + 3, Number(min), Number(ss)))
   return Number.isNaN(date.getTime()) ? undefined : date.toISOString()
+}
+
+function firstLabeledUrl(lines: string[], matcher: (normalizedLine: string) => boolean): string {
+  for (const line of lines) {
+    const normalized = normalizeText(line)
+    if (!matcher(normalized)) continue
+    const url = line.match(/https?:\/\/[^\s*]+/i)?.[0]
+    if (url) return cleanUrl(url)
+  }
+  return ''
+}
+
+function hostFromM3u(urls: string[]): { host?: string; username?: string; password?: string } {
+  for (const url of urls) {
+    if (!/\/get\.php/i.test(url)) continue
+    try {
+      const parsed = new URL(url)
+      const username = validValue(parsed.searchParams.get('username') || '')
+      const password = validValue(parsed.searchParams.get('password') || '')
+      return {
+        host: `${parsed.protocol}//${parsed.host}`,
+        username: username || undefined,
+        password: password || undefined,
+      }
+    } catch {
+      // Ignore malformed URLs from pasted panel text.
+    }
+  }
+  return {}
+}
+
+function webPlayerFromLines(lines: string[]): string {
+  for (let index = 0; index < lines.length; index += 1) {
+    const normalized = normalizeText(lines[index] || '')
+    if (!normalized.includes('web player')) continue
+    const sameLine = (lines[index] || '').match(/https?:\/\/[^\s*]+/i)?.[0]
+    if (sameLine) return cleanUrl(sameLine)
+    for (let offset = 1; offset <= 3; offset += 1) {
+      const next = lines[index + offset] || ''
+      const url = next.match(/https?:\/\/[^\s*]+/i)?.[0]
+      if (url) return cleanUrl(url)
+    }
+  }
+  return ''
+}
+
+function codeInSection(lines: string[], section: RegExp): string {
+  for (let index = 0; index < lines.length; index += 1) {
+    if (!section.test(normalizeText(lines[index] || ''))) continue
+    for (let offset = 1; offset <= 8; offset += 1) {
+      const line = lines[index + offset] || ''
+      const normalized = normalizeText(line)
+      if (/downloader|ntdown|m7|xs control|adultos?/.test(normalized)) continue
+      const match = line.match(/(?:code|c[oó]digo|codigo)\s*\*?\s*[:=\-]\s*\*?\s*([A-Za-z0-9._-]+)/i)
+      const value = validValue(match?.[1] || '')
+      if (value) return value
+    }
+  }
+  return ''
 }
 
 function inferPanel(text: string, host: string): Pick<ParsedProviderCredentials, 'panelName' | 'panelKey'> {
   const normalized = normalizeText(`${text} ${host}`)
-  if (normalized.includes('yellow') || normalized.includes('overhall') || normalized.includes('pedidospec')) {
+  if (normalized.includes('yellow') || normalized.includes('overhall') || normalized.includes('pedidospec') || normalized.includes('recordsway')) {
     return { panelName: 'Yellow Box', panelKey: 'yellow' }
   }
   if (normalized.includes('devxtop') || normalized.includes('xbr')) {
@@ -87,25 +192,29 @@ function inferPlan(text: string): Pick<ParsedProviderCredentials, 'planKey' | 's
 
 export function parseProviderText(rawText: string): ParsedProviderCredentials {
   const text = String(rawText || '').trim()
-  const username = firstMatch(text, [
-    /(?:usu[aá]rio|usuario|user|login)\s*[:\-]\s*([^\s]+)/i,
-  ])
-  const password = firstMatch(text, [
-    /(?:senha|password|pass)\s*[:\-]\s*([^\s]+)/i,
-  ])
-  const host = firstMatch(text, [
-    /(?:dns\/host|host\/dns|dns|host|url)\s*[:\-]\s*(https?:\/\/[^\s]+)/i,
-    /(https?:\/\/[^\s]+)/i,
-  ])
-  const dueAtText = firstMatch(text, [
-    /(?:vencimento|validade|vence em|venc\.)\s*[:\-]\s*([0-9/:\s]+)/i,
-  ])
-  const providerCode = firstMatch(text, [
-    /provider(?:\s+blessed)?\s*[:\-]\s*([a-z0-9]+)/i,
-  ])
-  const code = firstMatch(text, [
-    /(?:code|codigo|c[oó]digo)(?:\s+playsim)?\s*[:\-]\s*([a-z0-9]+)/i,
-  ])
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+  const urls = urlsFromText(text)
+  const m3u = hostFromM3u(urls)
+
+  const usernameLabel = /(?:usu[aá]rio|usuario|username|user|login)\s*\*?\s*[:=\-]\s*(.*)$/i
+  const passwordLabel = /(?:senha|password|pass)\s*\*?\s*[:=\-]\s*(.*)$/i
+  const usernameMasked = hasMaskedLineValue(lines, usernameLabel, { skip: /link|url|senha adultos?/ })
+  const passwordMasked = hasMaskedLineValue(lines, passwordLabel, { skip: /adultos?|link|url/ })
+  const username = usernameMasked ? '' : lineValue(lines, /(?:usu[aá]rio|usuario|username|user|login)\s*\*?\s*[:=\-]\s*\*?\s*([^\s*]+)/i, { skip: /link|url|senha adultos?/ }) || m3u.username || ''
+  const password = passwordMasked ? '' : lineValue(lines, /(?:senha|password|pass)\s*\*?\s*[:=\-]\s*\*?\s*([^\s*]+)/i, { skip: /adultos?|link|url/ }) || m3u.password || ''
+  const host = firstLabeledUrl(lines, (line) =>
+    /\b(?:dns|host|enter url)\b/.test(line) &&
+    !/dns\s*(?:smart|stb)|smart\s*(?:up|stb)|web player|checkout|assinar|renovar|link m3u|link hls|ssiptv|link direto/.test(line)
+  ) || m3u.host || ''
+  const smartTvDns = lineValue(lines, /(?:dns\s*smart\s*up\s*\/?\s*smart\s*stb|dns\s*smart|smart\s*up|smart\s*stb)\s*\*?\s*[:=\-]\s*\*?\s*([A-Za-z0-9.:/_-]+)/i)
+  const webPlayer = webPlayerFromLines(lines)
+  const checkoutUrl = firstLabeledUrl(lines, (line) => /checkout|assinar|renovar/.test(line))
+  const dueAtText = lineValue(lines, /(?:vencimento|validade|vence em|venc\.)\s*\*?\s*[:=\-]\s*\*?\s*([0-9/:\s]+)/i)
+  const providerCode = lineValue(lines, /provider(?:\s+blessed)?\s*\*?\s*[:=\-]\s*\*?\s*([A-Za-z0-9._-]+)/i)
+  const playsimCode = codeInSection(lines, /playsim|play sim|assist/)
+  const rp725Code = codeInSection(lines, /rp725/)
+  const firstCode = lineValue(lines, /(?:code|c[oó]digo|codigo)(?:\s+playsim)?\s*\*?\s*[:=\-]\s*\*?\s*([A-Za-z0-9._-]+)/i, { skip: /downloader|ntdown|m7|xs control|adultos?/ })
+  const code = playsimCode || firstCode
 
   const panel = inferPanel(text, host)
   const app = inferApp(text, providerCode, code)
@@ -114,6 +223,7 @@ export function parseProviderText(rawText: string): ParsedProviderCredentials {
   if (!username) warnings.push('Usuario nao identificado.')
   if (!password) warnings.push('Senha nao identificada.')
   if (!host) warnings.push('Host/DNS nao identificado.')
+  if (usernameMasked || passwordMasked) warnings.push('Credencial mascarada ignorada.')
   if (!panel.panelKey) warnings.push('Painel provavel nao identificado.')
   if (!app.appKey) warnings.push('App provavel nao identificado.')
   const requiredFound = [username, password, host].filter(Boolean).length
@@ -124,10 +234,14 @@ export function parseProviderText(rawText: string): ParsedProviderCredentials {
     username: username || undefined,
     password: password || undefined,
     host: host || undefined,
-    dueAt: dueAtText ? parseBRDate(dueAtText) : undefined,
+    smartTvDns: smartTvDns || undefined,
+    webPlayer: webPlayer || undefined,
+    checkoutUrl: checkoutUrl || undefined,
+    dueAt: dueAtText ? parseBRDateSaoPaulo(dueAtText) : undefined,
     dueAtText: dueAtText || undefined,
     providerCode: providerCode || undefined,
     code: code || undefined,
+    rp725Code: rp725Code || undefined,
     ...panel,
     ...app,
     ...plan,

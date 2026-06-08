@@ -58,6 +58,64 @@ const PANEL_PROVIDER_LOOKUP: Record<string, string> = {
   areaplay: 'AreaPlay / Sigma',
 }
 
+type ParsedCredentials = ReturnType<typeof parseProviderText>
+
+const CREDENTIALS_NOT_FOUND_MESSAGE = 'Usuário e senha não foram encontrados no texto colado. Cole novamente os dados completos do painel antes de enviar ao cliente.'
+const MASKED_ACCESS_VALUE_RE = /^(?:\*+|x{3,}|X{3,}|-+|_+|•+|●+)$/
+
+function cleanAccessValue(value: unknown): string {
+  return String(value || '')
+    .trim()
+    .replace(/^[*_`"'\s]+/g, '')
+    .replace(/[*_`"',.;\s]+$/g, '')
+    .trim()
+}
+
+function isInvalidAccessValue(value: unknown): boolean {
+  const text = cleanAccessValue(value)
+  return !text || /^(?:null|undefined)$/i.test(text) || MASKED_ACCESS_VALUE_RE.test(text)
+}
+
+function formatCurrencyBRL(value: number): string {
+  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value).replace(/\u00a0/g, ' ')
+}
+
+function formatDateBR(value: unknown): string {
+  const text = String(value || '').trim()
+  const br = text.match(/^(\d{2})\/(\d{2})\/(\d{4})/)
+  if (br) return `${br[1]}/${br[2]}/${br[3]}`
+  const date = new Date(text)
+  if (Number.isNaN(date.getTime())) return ''
+  return new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo' }).format(date)
+}
+
+function appCredentialRequirements(app: string, credentials: Partial<ParsedCredentials> & { provider_code?: string; dns?: string }) {
+  const normalized = app.toLowerCase()
+  const common = [
+    { key: 'username', label: 'Usuário', value: credentials.username },
+    { key: 'password', label: 'Senha', value: credentials.password },
+  ]
+  if (normalized === 'blessed') {
+    return [{ key: 'provider', label: 'Provider', value: credentials.providerCode || credentials.provider_code }, ...common]
+  }
+  if (normalized === 'playsim' || normalized === 'assist_plus') {
+    return [{ key: 'code', label: 'Code', value: credentials.code || credentials.provider_code }, ...common]
+  }
+  if (normalized === 'xcloud') {
+    return [{ key: 'host', label: 'Host', value: credentials.host }, ...common]
+  }
+  if (normalized === 'smart_stb') {
+    return [{ key: 'dns', label: 'DNS', value: credentials.smartTvDns || credentials.dns || credentials.host }, ...common]
+  }
+  return common
+}
+
+function validateAccessCredentials(app: string, credentials: Partial<ParsedCredentials> & { provider_code?: string; dns?: string }) {
+  const missing = appCredentialRequirements(app, credentials).filter((item) => isInvalidAccessValue(item.value))
+  if (!missing.length) return { ok: true as const }
+  return { ok: false as const, message: CREDENTIALS_NOT_FOUND_MESSAGE, missing: missing.map((item) => item.label) }
+}
+
 export function AtivarClientesPage() {
   const [step, setStep] = useState<Step>('busca')
   const [search, setSearch] = useState('')
@@ -280,6 +338,13 @@ export function AtivarClientesPage() {
       addToast('error', 'Confirme que voce ja liberou/renovou no painel do provedor')
       return
     }
+    if (providerText.trim()) {
+      const parsedValidation = validateAccessCredentials(appKey, parsedCredentials || {})
+      if (!parsedValidation.ok) {
+        addToast('error', parsedValidation.message)
+        return
+      }
+    }
     setAtivando(true)
     try {
       const res = await fetch('/api/activations', {
@@ -303,6 +368,10 @@ export function AtivarClientesPage() {
             username: parsedCredentials.username,
             password: parsedCredentials.password,
             host: parsedCredentials.host,
+            smart_tv_dns: parsedCredentials.smartTvDns,
+            dns: parsedCredentials.smartTvDns,
+            web_player: parsedCredentials.webPlayer,
+            checkout_url: parsedCredentials.checkoutUrl,
             due_at: parsedCredentials.dueAt,
             provider_code: parsedCredentials.providerCode,
             code: parsedCredentials.code,
@@ -316,6 +385,19 @@ export function AtivarClientesPage() {
       const data = await res.json().catch(() => null)
       if (!res.ok || !data?.success) throw new Error(data?.error || `HTTP ${res.status}`)
       addToast('success', 'Cliente ativado com sucesso')
+      const dispatchCredentials = {
+        username: parsedCredentials?.username || data.activation?.credentials?.username || '',
+        password: parsedCredentials?.password || data.activation?.credentials?.password || '',
+        host: parsedCredentials?.host || data.activation?.credentials?.host || '',
+        smartTvDns: parsedCredentials?.smartTvDns || data.activation?.credentials?.smart_tv_dns || '',
+        dns: parsedCredentials?.smartTvDns || data.activation?.credentials?.dns || data.activation?.credentials?.smart_tv_dns || '',
+        providerCode: parsedCredentials?.providerCode || data.activation?.credentials?.provider_code || '',
+        provider_code: parsedCredentials?.providerCode || data.activation?.credentials?.provider_code || '',
+        code: parsedCredentials?.code || data.activation?.credentials?.code || data.activation?.credentials?.provider_code || '',
+      }
+      const dispatchValidation = validateAccessCredentials(appKey, dispatchCredentials)
+      if (!dispatchValidation.ok) throw new Error(dispatchValidation.message)
+      const displayDueAt = formatDateBR(data.activation?.due_at || parsedCredentials?.dueAt || '')
       const flowRes = await fetch('/api/flows/dispatch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -327,12 +409,16 @@ export function AtivarClientesPage() {
             app: APPS.find((item) => item.id === appKey)?.label || appKey,
             panel: recommendation?.panel_name || PAINEIS.find((item) => item.id === panelKey)?.label || panelKey,
             plan: plano.displayLabel,
-            amount: `R$ ${valorFinal.toFixed(2)}`,
-            dueAt: data.activation?.due_at || '',
-            username: parsedCredentials?.username || data.activation?.credentials?.username || '',
-            password: parsedCredentials?.password || data.activation?.credentials?.password || '',
-            host: parsedCredentials?.host || data.activation?.credentials?.host || '',
-            code: parsedCredentials?.code || data.activation?.credentials?.code || '',
+            amount: formatCurrencyBRL(valorFinal),
+            dueAt: displayDueAt,
+            vencimento: displayDueAt,
+            username: dispatchCredentials.username,
+            password: dispatchCredentials.password,
+            host: dispatchCredentials.host,
+            dns: dispatchCredentials.dns,
+            provider_code: dispatchCredentials.provider_code,
+            providerCode: dispatchCredentials.providerCode,
+            code: dispatchCredentials.code,
           },
           context: {
             source: 'painel1',
@@ -461,9 +547,13 @@ export function AtivarClientesPage() {
                         <Extracted label="Usuario" value={parsedCredentials.username} />
                         <Extracted label="Senha" value={parsedCredentials.password} />
                         <Extracted label="Host/DNS" value={parsedCredentials.host} />
+                        <Extracted label="DNS Smart" value={parsedCredentials.smartTvDns} />
+                        <Extracted label="Web Player" value={parsedCredentials.webPlayer} />
+                        <Extracted label="Checkout" value={parsedCredentials.checkoutUrl} />
                         <Extracted label="Vencimento" value={parsedCredentials.dueAtText} />
                         <Extracted label="Provider" value={parsedCredentials.providerCode} />
                         <Extracted label="Code" value={parsedCredentials.code} />
+                        <Extracted label="Code RP725" value={parsedCredentials.rp725Code} />
                         <Extracted label="Painel provavel" value={parsedCredentials.panelName} />
                         <Extracted label="App provavel" value={parsedCredentials.appName} />
                         <Extracted label="Plano" value={parsedCredentials.planKey} />
@@ -523,7 +613,7 @@ export function AtivarClientesPage() {
                   <Row label="Painel" value={PAINEIS.find(item => item.id === panelKey)?.label || panelKey} />
                   <Row label="Plano" value={plano.displayLabel} />
                   <Row label="Telas" value={`${screensCount}`} />
-                  <Row label="Valor" value={`R$ ${valorFinal}`} />
+                  <Row label="Valor" value={formatCurrencyBRL(valorFinal)} />
                 </div>
               </Panel>
               <Panel title="Catalogo aplicado">
