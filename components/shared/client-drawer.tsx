@@ -58,6 +58,7 @@ type ClientCredentialsPayload = {
   } | null
   selectedApp?: { key: string; name: string } | null
   plan?: { key?: string | null; amountCents?: number | null; dueAt?: string | null; status?: string | null } | null
+  package?: { type?: 'no_adult' | 'full_adult'; adultContent?: boolean } | null
   apps: CatalogAppCredential[]
   warnings?: string[]
   error?: string
@@ -71,6 +72,7 @@ type ClientEditForm = {
   panel: string
   planKey: string
   screensCount: ScreensCount
+  packageType: 'no_adult' | 'full_adult'
   amount: string
   dueAt: string
   username: string
@@ -150,6 +152,8 @@ export function ClientDrawer({
   const [editOpen, setEditOpen] = useState(false)
   const [editForm, setEditForm] = useState<ClientEditForm | null>(null)
   const [savingEdit, setSavingEdit] = useState(false)
+  const [upgradeOpen, setUpgradeOpen] = useState(false)
+  const [upgradingAdult, setUpgradingAdult] = useState(false)
 
   useEffect(() => {
     let alive = true
@@ -216,6 +220,7 @@ export function ClientDrawer({
       panel: details?.provider?.name || cliente?.servidor || metadataString(clientMetadata, 'panel_label'),
       planKey,
       screensCount,
+      packageType: details?.package?.type === 'full_adult' || clientMetadata.package_type === 'full_adult' ? 'full_adult' : 'no_adult',
       amount: amountTextFromCents(details?.plan?.amountCents, fallbackPlan.amountCents),
       dueAt: toInputDate(details?.plan?.dueAt || details?.account?.expiresAt || cliente?.vencimento),
       username: details?.account?.username || cliente?.usuario || '',
@@ -247,6 +252,8 @@ export function ClientDrawer({
           panel: payload.panel,
           plan_key: payload.planKey,
           screens_count: payload.screensCount,
+          package_type: payload.packageType,
+          adult_content: payload.packageType === 'full_adult',
           amount_cents: Number.isFinite(amount) ? Math.round(amount * 100) : undefined,
           due_at: payload.dueAt,
           username: payload.username,
@@ -361,6 +368,30 @@ export function ClientDrawer({
   const username = details?.account?.username || cliente?.usuario || ''
   const password = details?.account?.password || cliente?.senha || ''
   const appPreview = details?.apps.slice(0, 8) || []
+  const canUpgradeFullAdult = Boolean(cliente && cliente.status === 'ativo' && details?.account?.id)
+
+  async function upgradeToFullAdult() {
+    if (!cliente?.id || upgradingAdult) return
+    setUpgradingAdult(true)
+    try {
+      const res = await fetch(`/api/clients/${cliente.id}/upgrade-full-adult`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirm: true }),
+      })
+      const data = await res.json().catch(() => null)
+      if (!res.ok || !data?.success) throw new Error(data?.error || `HTTP ${res.status}`)
+      addToast('success', data.dispatch?.dry_run ? 'Acesso +18 atualizado em dry-run' : 'Acesso atualizado para completo +18')
+      setUpgradeOpen(false)
+      const refreshed = await fetch(`/api/clients/${cliente.id}/credentials`, { cache: 'no-store' })
+      const refreshedPayload = await refreshed.json().catch(() => null) as ClientCredentialsPayload | null
+      if (refreshed.ok && refreshedPayload?.success) setDetails(refreshedPayload)
+    } catch (err) {
+      addToast('error', err instanceof Error ? err.message : 'Falha ao trocar para completo +18')
+    } finally {
+      setUpgradingAdult(false)
+    }
+  }
 
   return (
     <AnimatePresence>
@@ -521,6 +552,11 @@ export function ClientDrawer({
               <button onClick={openEditModal} className="h-10 rounded-xl px-3 text-sm font-medium flex items-center justify-center gap-2" style={{ background: 'rgba(148,163,184,0.1)', color: '#cbd5e1', border: '1px solid rgba(148,163,184,0.2)' }}>
                 <Save className="h-4 w-4" /> Editar
               </button>
+              {canUpgradeFullAdult && (
+                <button onClick={() => setUpgradeOpen(true)} className="h-10 rounded-xl px-3 text-sm font-medium flex items-center justify-center gap-2" style={{ background: 'rgba(245,158,11,0.12)', color: '#fbbf24', border: '1px solid rgba(245,158,11,0.28)' }}>
+                  <Sparkles className="h-4 w-4" /> +18
+                </button>
+              )}
               <button onClick={() => setAssistantOpen(true)} className="h-10 rounded-xl px-3 text-sm font-medium flex items-center justify-center gap-2" style={{ background: 'rgba(20,184,166,0.12)', color: '#2dd4bf', border: '1px solid rgba(20,184,166,0.25)' }}>
                 <Bot className="h-4 w-4" /> Codex IA
               </button>
@@ -554,6 +590,17 @@ export function ClientDrawer({
                   navigator.clipboard.writeText(JSON.stringify(assistantData?.context || {}, null, 2))
                   addToast('success', 'Contexto copiado')
                 }}
+              />
+            )}
+            {upgradeOpen && cliente && (
+              <FullAdultUpgradeModal
+                cliente={cliente}
+                details={details}
+                upgrading={upgradingAdult}
+                onClose={() => {
+                  if (!upgradingAdult) setUpgradeOpen(false)
+                }}
+                onConfirm={upgradeToFullAdult}
               />
             )}
           </motion.div>
@@ -637,6 +684,14 @@ function ClientEditModal({
             </select>
           </label>
 
+          <label className="block">
+            <span className="text-[10px] text-slate-500 uppercase tracking-wider">Pacote</span>
+            <select value={form.packageType} disabled={saving} onChange={(event) => update('packageType', event.target.value as ClientEditForm['packageType'])} className="mt-2 h-11 w-full rounded-xl px-3 text-sm text-white outline-none disabled:opacity-60" style={{ background: 'var(--input)', border: '1px solid var(--border)' }}>
+              <option value="no_adult">Sem adulto</option>
+              <option value="full_adult">Completo +18</option>
+            </select>
+          </label>
+
           <EditField label="Valor do plano" value={form.amount} disabled={saving} onChange={(value) => update('amount', value)} />
           <label className="block">
             <span className="text-[10px] text-slate-500 uppercase tracking-wider">Vencimento</span>
@@ -698,6 +753,80 @@ function EditField({
         style={{ background: 'var(--input)', border: '1px solid var(--border)' }}
       />
     </label>
+  )
+}
+
+function FullAdultUpgradeModal({
+  cliente,
+  details,
+  upgrading,
+  onClose,
+  onConfirm,
+}: {
+  cliente: Cliente
+  details: ClientCredentialsPayload | null
+  upgrading: boolean
+  onClose: () => void
+  onConfirm: () => void
+}) {
+  const appName = details?.selectedApp?.name || cliente.app
+  const panelName = details?.provider?.name || cliente.servidor
+  const isXcloud = /x\s*cloud|xcloud/i.test(appName)
+
+  return (
+    <div className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center p-3" style={{ background: 'rgba(2,6,23,0.8)', backdropFilter: 'blur(10px)' }} onClick={onClose}>
+      <div className="w-full max-w-lg rounded-2xl" style={{ background: 'var(--background)', border: '1px solid var(--border)' }} onClick={(event) => event.stopPropagation()}>
+        <div className="flex items-center justify-between gap-3 p-4" style={{ borderBottom: '1px solid var(--border)' }}>
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-amber-300">Trocar pacote</p>
+            <h3 className="text-lg font-semibold text-white">Trocar para completo +18</h3>
+          </div>
+          <button disabled={upgrading} onClick={onClose} className="h-9 w-9 rounded-lg flex items-center justify-center text-slate-500 hover:text-white disabled:opacity-50" style={{ background: 'rgba(255,255,255,0.04)' }}>
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="space-y-4 p-4">
+          <p className="text-sm text-slate-300">Isso vai gerar um novo acesso completo +18 para este cliente. Confirmar?</p>
+          <div className="grid gap-2 text-sm">
+            <InfoRow label="Cliente" value={cliente.nome} />
+            <InfoRow label="App atual" value={appName} />
+            <InfoRow label="Painel atual" value={panelName} />
+            <InfoRow label="Usuario atual" value={details?.account?.username || cliente.usuario || '-'} />
+            <InfoRow label="Vencimento atual" value={cliente.vencimento} />
+            <InfoRow label="Plano" value={cliente.plano} />
+            <InfoRow label="Telas" value={String(cliente.telas || 1)} />
+            <InfoRow label="XCloud" value={isXcloud ? 'Sim' : 'Nao'} />
+          </div>
+          {isXcloud && (
+            <div className="rounded-xl p-3 text-xs text-amber-200" style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.18)' }}>
+              O XCloud sera reconfigurado antes do envio da mensagem. Se falhar, a mensagem de sucesso fica bloqueada.
+            </div>
+          )}
+        </div>
+
+        <div className="flex flex-col gap-2 p-4 sm:flex-row" style={{ borderTop: '1px solid var(--border)' }}>
+          <button disabled={upgrading} onClick={onClose} className="h-10 rounded-xl px-4 text-sm font-medium text-slate-400 disabled:opacity-50" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)' }}>
+            Cancelar
+          </button>
+          <button disabled={upgrading} onClick={onConfirm} className="h-10 flex-1 rounded-xl px-4 text-sm font-semibold text-white disabled:opacity-60" style={{ background: '#f59e0b' }}>
+            <span className="inline-flex items-center justify-center gap-2">
+              {upgrading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+              {upgrading ? 'Atualizando...' : 'Confirmar troca'}
+            </span>
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function InfoRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-lg px-3 py-2" style={{ background: 'rgba(255,255,255,0.025)' }}>
+      <span className="text-slate-500">{label}</span>
+      <span className="min-w-0 truncate text-right font-semibold text-white">{value}</span>
+    </div>
   )
 }
 

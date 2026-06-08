@@ -103,6 +103,8 @@ const actual = {
   dueDateDisplay: displayDate(parsed.dueAt),
   amount: parsed.amount,
   panelName: parsed.panelName,
+  packageType: parsed.packageType,
+  adultContent: parsed.adultContent,
 }
 
 const failures = Object.entries(expected)

@@ -7,6 +7,7 @@ import {
   type ProviderCatalogEntry,
   type BuiltCredentials,
 } from '@/lib/config/provider-catalog'
+import { packageTypeFromMetadata } from '@/lib/services/package-options'
 import { findAccountForClient, isOccupiedSlot, type AccountSharingSlot } from '@/lib/services/account-sharing'
 import { getSupabaseServerClient } from '@/lib/supabase/server'
 
@@ -118,6 +119,7 @@ export async function GET(_request: Request, context: RouteContext) {
   const panel = account?.panel_id ? panelsById.get(account.panel_id) : null
   const renewal = (renewalsRes.data || [])[0] as { plan_key?: string | null; amount_cents?: number | null; due_at?: string | null; status?: string | null } | undefined
   const metadata = account?.legacy_metadata || {}
+  const packageType = packageTypeFromMetadata(metadata)
 
   const provider = resolveProvider([
     panel?.key,
@@ -130,6 +132,7 @@ export async function GET(_request: Request, context: RouteContext) {
       success: true,
       client: clientRes.data,
       account: account ? { id: account.id, username: account.username, password: account.password_secret, hasSlot: false } : null,
+      package: { type: packageType, adultContent: packageType === 'full_adult' },
       provider: null,
       apps: [],
       warnings: ['Cliente sem conta/credencial vinculada ou painel sem catalogo.'],
@@ -177,6 +180,7 @@ export async function GET(_request: Request, context: RouteContext) {
       expiresAt: renewal?.due_at || account.expires_at || null,
       hasSlot,
     },
+    package: { type: packageType, adultContent: packageType === 'full_adult' },
     selectedApp: app ? { key: app.key, name: app.name } : null,
     plan: renewal ? { key: renewal.plan_key, amountCents: renewal.amount_cents, dueAt: renewal.due_at, status: renewal.status } : null,
     apps,

@@ -22,6 +22,8 @@ export async function GET(req: NextRequest) {
       slot_id: url.searchParams.get('slot_id') || undefined,
       slot_number: num(url.searchParams.get('slot_number')),
       screens_count: num(url.searchParams.get('screens_count')),
+      package_type: url.searchParams.get('package_type') || url.searchParams.get('provider_package') || undefined,
+      adult_content: url.searchParams.get('adult_content') === 'true' ? true : undefined,
     })
     return NextResponse.json(result)
   } catch (error) {

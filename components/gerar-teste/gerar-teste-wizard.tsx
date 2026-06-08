@@ -24,6 +24,7 @@ interface FormData {
   app: string
   servidor: string
   deviceKey: string
+  packageType: 'no_adult' | 'full_adult'
 }
 
 interface TesteGerado {
@@ -134,6 +135,11 @@ const SERVIDORES = [
     image: 'https://hebbkx1anhila5yf.public.blob.vercel-storage.com/367753a2-c091-4207-96fb-08efbb3ce78d-oKHw7v46xS8SBH0hDTQDXACYsUMivv.png',
     status: 'Online',
   },
+]
+
+const PACOTES = [
+  { id: 'no_adult' as const, label: 'Sem adulto', color: '#14b8a6' },
+  { id: 'full_adult' as const, label: 'Completo +18', color: '#f59e0b' },
 ]
 
 // Etapas de geração mais detalhadas (melhoria #7)
@@ -298,7 +304,7 @@ function NeonBackground() {
 export function GerarTesteWizard() {
   const [wizardStep, setWizardStep] = useState<WizardStep>(1)
   const [processStep, setProcessStep] = useState<ProcessStep | null>(null)
-  const [form, setForm] = useState<FormData>({ nome: '', telefone: '', app: '', servidor: '', deviceKey: '' })
+  const [form, setForm] = useState<FormData>({ nome: '', telefone: '', app: '', servidor: '', deviceKey: '', packageType: 'no_adult' })
   const [generationSteps, setGenerationSteps] = useState<GenerationProgressStep[]>(initialGenerationSteps)
   const [teste, setTeste] = useState<TesteGerado | null>(null)
   const [copied, setCopied] = useState(false)
@@ -336,6 +342,8 @@ export function GerarTesteWizard() {
             phone: form.telefone,
             app_key: form.app,
             panel_key: form.servidor,
+            package_type: form.packageType,
+            adult_content: form.packageType === 'full_adult',
             device_key: form.app === 'xcloud' ? normalizedDeviceKey : undefined,
             operator_ref: operatorRef,
           }),
@@ -516,11 +524,13 @@ export function GerarTesteWizard() {
             username: teste.usuario,
             password: teste.senha,
             code: teste.codigo,
+            package_type: form.packageType,
           },
           context: {
             source: 'painel1',
             operator_ref: 'painel_web',
             test_id: teste.id,
+            package_type: form.packageType,
           },
         }),
       })
@@ -658,7 +668,7 @@ export function GerarTesteWizard() {
     setProcessStep(null)
     setWizardStep(1)
     setDirection(1)
-    setForm({ nome: '', telefone: '', app: '', servidor: '', deviceKey: '' })
+    setForm({ nome: '', telefone: '', app: '', servidor: '', deviceKey: '', packageType: 'no_adult' })
     setGenerationSteps(initialGenerationSteps())
     setTeste(null)
     setCopied(false)
@@ -1124,6 +1134,28 @@ function StepConfirmar({
         <ResumoItem label="Telefone" value={form.telefone} />
         <ResumoItem label="Aplicativo" value={appSelecionado?.label || ''} />
         <ResumoItem label="Servidor" value={servidorSelecionado?.label || ''} />
+        <ResumoItem label="Pacote" value={PACOTES.find((item) => item.id === form.packageType)?.label || 'Sem adulto'} />
+      </div>
+
+      <div className="mb-7">
+        <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500">Pacote</p>
+        <div className="grid grid-cols-2 gap-3">
+          {PACOTES.map((pacote) => (
+            <button
+              key={pacote.id}
+              type="button"
+              onClick={() => onChange({ ...form, packageType: pacote.id })}
+              className="rounded-xl p-3 text-sm font-semibold transition-all"
+              style={{
+                background: form.packageType === pacote.id ? `${pacote.color}18` : 'rgba(255,255,255,0.02)',
+                border: form.packageType === pacote.id ? `1px solid ${pacote.color}` : '1px solid var(--border)',
+                color: form.packageType === pacote.id ? pacote.color : '#94a3b8',
+              }}
+            >
+              {pacote.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {form.app === 'xcloud' && (

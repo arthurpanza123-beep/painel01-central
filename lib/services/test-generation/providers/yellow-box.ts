@@ -9,6 +9,13 @@ type YellowBoxInput = {
   device_key?: string
 }
 
+type ProviderAccessUrlInput = YellowBoxInput & {
+  api_url: string
+  api_key?: string
+  timeout_ms?: number
+  provider_name: string
+}
+
 type JsonRecord = Record<string, unknown>
 
 function firstText(...values: unknown[]): string {
@@ -112,7 +119,7 @@ function hostFromM3u(m3u: string): string {
   }
 }
 
-function parseYellowBoxResponse(raw: string): ProviderTestResult {
+export function parseProviderAccessResponse(raw: string, providerName = 'yellow_box'): ProviderTestResult {
   const payload = parseJson(raw)
   const nested = nestedRecord(payload)
   const source = { ...(payload || {}), ...nested }
@@ -157,7 +164,7 @@ function parseYellowBoxResponse(raw: string): ProviderTestResult {
   const orderId = firstText(source.order_id, source.orderId, source.pedido, source.request_id, source.id)
 
   if (!username || !password) {
-    throw new Error('Yellow Box retornou payload sem usuario/senha.')
+    throw new Error(`${providerName} retornou payload sem usuario/senha.`)
   }
 
   return {
@@ -171,19 +178,20 @@ function parseYellowBoxResponse(raw: string): ProviderTestResult {
     optional_m3u_url: m3u || undefined,
     optional_hls_url: hls || undefined,
     raw_provider_response: {
-      provider: 'yellow_box',
+      provider: providerName,
       parsed_from: payload ? 'json' : 'text',
       raw_text: raw,
     },
   }
 }
 
-export async function createYellowBoxTest(input: YellowBoxInput): Promise<ProviderTestResult> {
-  const apiUrl = String(process.env.YELLOW_BOX_API_URL || process.env.BRASILTV_API_URL || '').trim()
-  const apiKey = String(process.env.YELLOW_BOX_API_KEY || '').trim()
-  const timeoutMs = Math.max(Number(process.env.YELLOW_BOX_TIMEOUT_MS || 30000), 1000)
+export async function createProviderAccessFromUrl(input: ProviderAccessUrlInput): Promise<ProviderTestResult> {
+  const apiUrl = String(input.api_url || '').trim()
+  const apiKey = String(input.api_key || '').trim()
+  const timeoutMs = Math.max(Number(input.timeout_ms || 30000), 1000)
+  const providerName = input.provider_name || 'provider'
 
-  if (!apiUrl) throw new Error('YELLOW_BOX_API_URL nao configurada.')
+  if (!apiUrl) throw new Error(`${providerName} API URL nao configurada.`)
 
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
@@ -206,15 +214,25 @@ export async function createYellowBoxTest(input: YellowBoxInput): Promise<Provid
     })
     const raw = await response.text()
     if (!response.ok) {
-      throw new Error(`Yellow Box HTTP ${response.status}: ${maskSensitiveText(raw.slice(0, 300))}`)
+      throw new Error(`${providerName} HTTP ${response.status}: ${maskSensitiveText(raw.slice(0, 300))}`)
     }
-    return parseYellowBoxResponse(raw)
+    return parseProviderAccessResponse(raw, providerName)
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
-      throw new Error(`Yellow Box timeout apos ${timeoutMs}ms.`)
+      throw new Error(`${providerName} timeout apos ${timeoutMs}ms.`)
     }
     throw error
   } finally {
     clearTimeout(timer)
   }
+}
+
+export async function createYellowBoxTest(input: YellowBoxInput): Promise<ProviderTestResult> {
+  return createProviderAccessFromUrl({
+    ...input,
+    api_url: String(process.env.YELLOW_BOX_API_URL || process.env.BRASILTV_API_URL || '').trim(),
+    api_key: String(process.env.YELLOW_BOX_API_KEY || '').trim(),
+    timeout_ms: Math.max(Number(process.env.YELLOW_BOX_TIMEOUT_MS || 30000), 1000),
+    provider_name: 'yellow_box',
+  })
 }

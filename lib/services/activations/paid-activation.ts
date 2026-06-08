@@ -1,6 +1,9 @@
 import { maskSensitiveText } from '@/lib/services/masking'
 import { getSupabaseServerClient } from '@/lib/supabase/server'
 import { findProvider } from '@/lib/config/provider-catalog'
+import { createFullAdultAccess } from '@/lib/services/full-adult-provider'
+import { normalizePackageType, packageMetadata, packageTypeFromMetadata, type PackageType } from '@/lib/services/package-options'
+import type { ProviderTestResult } from '@/lib/services/test-generation/types'
 import {
   officialPlanAmountCents,
   normalizePlanKey,
@@ -57,6 +60,9 @@ type ActivationInput = {
     app_name?: string
     raw_text?: string
   }
+  adult_content?: boolean
+  package_type?: string
+  provider_package?: string
   operator_ref?: string
 }
 
@@ -98,6 +104,8 @@ type AccountRow = {
   max_slots: number | null
   status: string | null
   expires_at: string | null
+  created_at?: string | null
+  activated_at?: string | null
   legacy_metadata?: JsonRecord | null
 }
 
@@ -465,15 +473,15 @@ async function findFreeSlot(appId: string, panelId?: string | null, requested?: 
   account_id?: string
   slot_id?: string
   slot_number?: number
-}, requiredSlots = 1): Promise<{ account: AccountRow; slot: SlotRow; slots: SlotRow[]; capacity: number } | null> {
+}, requiredSlots = 1, packageType: PackageType = 'no_adult'): Promise<{ account: AccountRow; slot: SlotRow; slots: SlotRow[]; capacity: number } | null> {
   const database = db()
 
   let query = database
     .from('accounts')
-    .select('id,app_id,panel_id,username,password_secret,device_key,provider,provider_code,panel_external_id,max_slots,status,expires_at,legacy_metadata')
+    .select('id,app_id,panel_id,username,password_secret,device_key,provider,provider_code,panel_external_id,max_slots,status,expires_at,created_at,activated_at,legacy_metadata')
     .eq('app_id', appId)
     .eq('status', 'active')
-    .order('created_at', { ascending: true })
+    .order('created_at', { ascending: false })
 
   if (panelId) query = query.eq('panel_id', panelId)
   if (requested?.account_id) query = query.eq('id', requested.account_id)
@@ -481,7 +489,9 @@ async function findFreeSlot(appId: string, panelId?: string | null, requested?: 
   const { data: accountsData, error: accountsError } = await query
   if (accountsError) throw new ActivationError(500, 'ACCOUNT_LOOKUP_FAILED', accountsError.message)
 
-  const accounts = (accountsData || []) as AccountRow[]
+  const accounts = ((accountsData || []) as AccountRow[])
+    .filter((account) => packageTypeFromMetadata(account.legacy_metadata) === packageType)
+    .sort((a, b) => accountCreatedKey(b).localeCompare(accountCreatedKey(a)))
   if (!accounts.length) return null
 
   const accountIds = accounts.map((account) => account.id)
@@ -543,7 +553,24 @@ function providerFromPanel(panel: PanelRow | null): string | null {
   return key || null
 }
 
-async function createConfirmedNewAccount(context: ActivationContext, input: ActivationInput): Promise<{ account: AccountRow; slot: SlotRow; slots: SlotRow[]; capacity: number }> {
+function publicCode(appKey: string, providerCode?: string | null): string | undefined {
+  if (providerCode) return providerCode
+  if (appKey === 'blessed') return '1105'
+  if (appKey === 'playsim' || appKey === 'assist_plus') return '187052'
+  if (appKey === 'funplay') return '00112'
+  return undefined
+}
+
+function accountCreatedKey(account: AccountRow): string {
+  return String(account.created_at || account.activated_at || account.expires_at || '')
+}
+
+async function createConfirmedNewAccount(
+  context: ActivationContext,
+  input: ActivationInput,
+  packageType: PackageType = 'no_adult',
+  providerAccess?: ProviderTestResult | null,
+): Promise<{ account: AccountRow; slot: SlotRow; slots: SlotRow[]; capacity: number }> {
   if (!input.create_new_account_confirmed) {
     throw new ActivationError(409, 'NO_FREE_SLOT', 'Nenhuma tela livre compativel encontrada. Criacao de nova conta exige confirmacao do operador.')
   }
@@ -560,6 +587,8 @@ async function createConfirmedNewAccount(context: ActivationContext, input: Acti
     throw new ActivationError(409, 'PANEL_CAPACITY_INSUFFICIENT', `Este painel suporta ${capacity} tela${capacity > 1 ? 's' : ''} por conta.`)
   }
   const now = new Date().toISOString()
+  const pkg = packageMetadata(packageType)
+  const providerCode = publicCode(context.app.key, input.new_account?.provider_code || providerAccess?.provider_code || context.test?.provider_code || null)
   const { data: accountData, error: accountError } = await database
     .from('accounts')
     .insert({
@@ -571,8 +600,8 @@ async function createConfirmedNewAccount(context: ActivationContext, input: Acti
       password_secret: password,
       device_key: input.new_account?.device_key || null,
       provider: input.new_account?.provider || providerFromPanel(context.panel),
-      provider_code: input.new_account?.provider_code || context.test?.provider_code || null,
-      panel_external_id: input.new_account?.panel_external_id || null,
+      provider_code: providerCode || null,
+      panel_external_id: input.new_account?.panel_external_id || providerAccess?.order_id || null,
       max_slots: capacity,
       status: 'active',
       activated_at: now,
@@ -580,6 +609,17 @@ async function createConfirmedNewAccount(context: ActivationContext, input: Acti
       legacy_metadata: {
         created_by_paid_activation: true,
         test_id: context.test?.id || null,
+        ...pkg,
+        host: providerAccess?.host || input.credentials?.host || null,
+        dns: providerAccess?.dns || input.credentials?.dns || input.credentials?.host || null,
+        provider_code: providerCode || null,
+        full_adult_generated_at: packageType === 'full_adult' ? now : null,
+        technical_connection: providerAccess ? {
+          connection_type: 'xtream',
+          optional_m3u_url: providerAccess.optional_m3u_url || null,
+          optional_hls_url: providerAccess.optional_hls_url || null,
+          raw_provider_response: providerAccess.raw_provider_response,
+        } : null,
       },
     })
     .select('id,app_id,panel_id,username,password_secret,device_key,provider,provider_code,panel_external_id,max_slots,status,expires_at,legacy_metadata')
@@ -591,10 +631,10 @@ async function createConfirmedNewAccount(context: ActivationContext, input: Acti
   const slotRows = Array.from({ length: capacity }, (_, index) => ({
     account_id: account.id,
     slot_number: index + 1,
-    status: 'free',
-    expires_at: context.due_at,
-    metadata: { created_by_paid_activation: true },
-  }))
+      status: 'free',
+      expires_at: context.due_at,
+      metadata: { created_by_paid_activation: true, ...pkg },
+    }))
 
   const { data: slotsData, error: slotsError } = await database
     .from('account_slots')
@@ -686,6 +726,30 @@ function activationCredentialMetadata(input: ActivationInput, credentials: Retur
   }
 }
 
+function providerAccessFromPastedCredentials(context: ActivationContext, input: ActivationInput): ProviderTestResult | null {
+  if (!input.credentials?.raw_text) return null
+  const username = cleanCredential(input.credentials.username)
+  const password = cleanCredential(input.credentials.password)
+  if (isInvalidCredential(username) || isInvalidCredential(password)) return null
+  const providerCode = publicCode(context.app.key, input.credentials.provider_code || input.credentials.code || context.test?.provider_code || null)
+  return {
+    order_id: undefined,
+    host: cleanCredential(input.credentials.host || input.credentials.dns) || undefined,
+    username,
+    password,
+    provider_code: providerCode,
+    dns: cleanCredential(input.credentials.dns || input.credentials.smart_tv_dns || input.credentials.host) || undefined,
+    expires_at: input.credentials.due_at || context.due_at,
+    optional_m3u_url: undefined,
+    optional_hls_url: undefined,
+    raw_provider_response: {
+      provider: 'operator_pasted_full_adult',
+      parsed_from: 'operator_text',
+      raw_text_present: true,
+    },
+  }
+}
+
 export async function getActivationRecommendation(input: {
   client_id?: string
   test_id?: string
@@ -697,7 +761,11 @@ export async function getActivationRecommendation(input: {
   slot_id?: string
   slot_number?: number
   screens_count?: number
+  adult_content?: boolean
+  package_type?: string
+  provider_package?: string
 }): Promise<ActivationRecommendation> {
+  const packageType = normalizePackageType(input.package_type || input.provider_package || input.adult_content)
   const context = await resolveContext({
     client_id: input.client_id,
     test_id: input.test_id,
@@ -718,6 +786,7 @@ export async function getActivationRecommendation(input: {
       app_key: context.app.key,
       panel_key: context.panel?.key || null,
       screens_count: context.screens_count,
+      package_type: packageType,
     },
   })
   await writeLog('ACTIVATION_PROVIDER_RESOLVED', 'info', {
@@ -734,7 +803,7 @@ export async function getActivationRecommendation(input: {
       screens_count: context.screens_count,
     },
   })
-  const found = await findFreeSlot(context.app.id, context.panel?.id || null, input, context.screens_count)
+  const found = await findFreeSlot(context.app.id, context.panel?.id || null, input, context.screens_count, packageType)
   const capacity = panelCapacity(context.panel)
 
   if (!found) {
@@ -749,6 +818,7 @@ export async function getActivationRecommendation(input: {
         panel_key: context.panel?.key || null,
         requires_new_account: true,
         screens_count: context.screens_count,
+        package_type: packageType,
       },
     })
     return {
@@ -787,6 +857,7 @@ export async function getActivationRecommendation(input: {
       slot_number: found.slot.slot_number,
       slot_ids: found.slots.map((slot) => slot.id),
       screens_count: context.screens_count,
+      package_type: packageType,
       requires_new_account: false,
     },
   })
@@ -843,6 +914,8 @@ export async function activatePaidClient(input: ActivationInput) {
   } = { slots: [] }
 
   try {
+    const packageType = normalizePackageType(input.package_type || input.provider_package || input.adult_content)
+    const pkg = packageMetadata(packageType)
     const context = await resolveContext(input)
     await writeLog('ACTIVATION_STARTED', 'info', {
       client_id: context.client.id,
@@ -858,6 +931,7 @@ export async function activatePaidClient(input: ActivationInput) {
         account_id: input.account_id || null,
         slot_id: input.slot_id || null,
         screens_count: context.screens_count,
+        package_type: packageType,
       },
     })
     await writeLog('ACTIVATION_PROVIDER_RESOLVED', 'info', {
@@ -871,6 +945,7 @@ export async function activatePaidClient(input: ActivationInput) {
         panel_id: context.panel?.id || null,
         panel_key: context.panel?.key || null,
         panel_name: context.panel?.name || null,
+        package_type: packageType,
       },
     })
 
@@ -882,16 +957,52 @@ export async function activatePaidClient(input: ActivationInput) {
       account_id: input.account_id,
       slot_id: input.slot_id,
       slot_number: input.slot_number,
-    }, context.screens_count)
+    }, context.screens_count, packageType)
 
     if (!requestedSlot) {
-      requestedSlot = await createConfirmedNewAccount(context, input)
+      if (packageType === 'full_adult') {
+        const pastedAccess = providerAccessFromPastedCredentials(context, input)
+        const providerAccess = pastedAccess || await createFullAdultAccess({
+          client_name: context.client.name || context.client.id,
+          phone: context.client.phone_e164 || context.client.phone_raw || '',
+          app_key: context.app.key,
+          panel_key: context.panel?.key || '',
+          panel_name: context.panel?.name || '',
+          device_key: input.new_account?.device_key || undefined,
+        })
+        requestedSlot = await createConfirmedNewAccount(context, {
+          ...input,
+          create_new_account_confirmed: true,
+          new_account: {
+            ...(input.new_account || {}),
+            username: providerAccess.username,
+            password_secret: providerAccess.password,
+            provider: providerFromPanel(context.panel) || undefined,
+            provider_code: publicCode(context.app.key, providerAccess.provider_code) || undefined,
+            panel_external_id: providerAccess.order_id,
+            expires_at: context.due_at,
+          },
+          credentials: {
+            ...(input.credentials || {}),
+            username: providerAccess.username,
+            password: providerAccess.password,
+            host: providerAccess.host,
+            dns: providerAccess.dns || providerAccess.host,
+            provider_code: publicCode(context.app.key, providerAccess.provider_code),
+            code: publicCode(context.app.key, providerAccess.provider_code),
+            due_at: providerAccess.expires_at,
+          },
+        }, packageType, providerAccess)
+      } else {
+        requestedSlot = await createConfirmedNewAccount(context, input, packageType)
+      }
       touched.created_account_id = requestedSlot.account.id
     }
 
     const { account, slot, slots } = requestedSlot
     const credentials = assertActivationCredentials(context, input, account)
     const credentialMetadata = activationCredentialMetadata(input, credentials)
+    Object.assign(credentialMetadata, pkg)
     const now = new Date().toISOString()
     const occupiedSlots: SlotRow[] = []
 
@@ -911,6 +1022,7 @@ export async function activatePaidClient(input: ActivationInput) {
             panel_id: context.panel?.id || null,
             plan_key: context.plan_key,
             screens_count: context.screens_count,
+            ...pkg,
             credentials: credentialMetadata,
           },
         })
@@ -942,6 +1054,7 @@ export async function activatePaidClient(input: ActivationInput) {
       ...(account.legacy_metadata || {}),
       paid_activation_credentials: credentialMetadata,
       paid_activation_credentials_updated_at: now,
+      ...pkg,
     }
     const { error: accountMetadataError } = await database
       .from('accounts')
@@ -962,6 +1075,7 @@ export async function activatePaidClient(input: ActivationInput) {
         slot_ids: occupiedSlots.map((item) => item.id),
         slot_numbers: occupiedSlots.map((item) => item.slot_number),
         screens_count: context.screens_count,
+        package_type: packageType,
       },
     })
 
@@ -977,6 +1091,7 @@ export async function activatePaidClient(input: ActivationInput) {
           active_slot_ids: occupiedSlots.map((item) => item.id),
           screens_count: context.screens_count,
           paid_activation_at: now,
+          ...pkg,
           paid_activation_credentials: credentialMetadata,
         },
       })
@@ -990,7 +1105,7 @@ export async function activatePaidClient(input: ActivationInput) {
       test_id: context.test?.id || null,
       account_id: account.id,
       message: `Cliente ${context.client.name || context.client.id} ativado como pago.`,
-      metadata: { slot_id: slot.id, slot_ids: occupiedSlots.map((item) => item.id), plan_key: context.plan_key, screens_count: context.screens_count, due_at: context.due_at },
+      metadata: { slot_id: slot.id, slot_ids: occupiedSlots.map((item) => item.id), plan_key: context.plan_key, screens_count: context.screens_count, due_at: context.due_at, package_type: packageType },
     })
 
     if (context.test) {
@@ -1006,6 +1121,7 @@ export async function activatePaidClient(input: ActivationInput) {
             active_slot_ids: occupiedSlots.map((item) => item.id),
             screens_count: context.screens_count,
             paid_activation: true,
+            ...pkg,
           },
         })
         .eq('id', context.test.id)
@@ -1042,6 +1158,7 @@ export async function activatePaidClient(input: ActivationInput) {
           app_id: context.app.id,
           panel_id: context.panel?.id || null,
           screens_count: context.screens_count,
+          ...pkg,
           slot_ids: occupiedSlots.map((item) => item.id),
           credentials: credentialMetadata,
         },
@@ -1057,7 +1174,7 @@ export async function activatePaidClient(input: ActivationInput) {
       test_id: context.test?.id || null,
       account_id: account.id,
       message: `Renovacao criada para ${context.due_at}.`,
-      metadata: { renewal_id: renewal.id, slot_id: slot.id, slot_ids: occupiedSlots.map((item) => item.id), amount_cents: context.amount_cents, screens_count: context.screens_count },
+      metadata: { renewal_id: renewal.id, slot_id: slot.id, slot_ids: occupiedSlots.map((item) => item.id), amount_cents: context.amount_cents, screens_count: context.screens_count, package_type: packageType },
     })
 
     await createPipelineEvent('paid_activation_completed', {
@@ -1075,6 +1192,7 @@ export async function activatePaidClient(input: ActivationInput) {
         renewal_id: renewal.id,
         slot_ids: occupiedSlots.map((item) => item.id),
         screens_count: context.screens_count,
+        package_type: packageType,
         reused_existing_slot: true,
       },
     })
@@ -1093,6 +1211,7 @@ export async function activatePaidClient(input: ActivationInput) {
         panel_key: context.panel?.key || null,
         renewal_id: renewal.id,
         pasted_credentials: Boolean(input.credentials?.raw_text),
+        package_type: packageType,
       },
     })
 
@@ -1114,6 +1233,8 @@ export async function activatePaidClient(input: ActivationInput) {
         amount_cents: context.amount_cents,
         due_at: context.due_at,
         credentials,
+        package_type: packageType,
+        adult_content: pkg.adult_content,
         reused_existing_slot: true,
       },
     }

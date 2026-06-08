@@ -11,6 +11,7 @@ import { parseProviderText } from '@/lib/services/credentials/parse-provider-tex
 import { OFFICIAL_PLANS, officialPlan, normalizeScreensCount, type ScreensCount } from '@/lib/services/official-plans'
 
 type Step = 'busca' | 'app_plano' | 'confirmar'
+type PackageType = 'no_adult' | 'full_adult'
 type Recommendation = {
   recommended: boolean
   reason: string
@@ -47,6 +48,11 @@ const PAINEIS = [
   { id: 'cinemax', label: 'CineMax' },
   { id: 'xbr', label: 'XBR / DevXTop' },
   { id: 'areaplay', label: 'AreaPlay / Sigma' },
+]
+
+const PACKAGE_OPTIONS: Array<{ id: PackageType; label: string; color: string }> = [
+  { id: 'no_adult', label: 'Sem adulto', color: '#14b8a6' },
+  { id: 'full_adult', label: 'Completo +18', color: '#f59e0b' },
 ]
 
 const PANEL_PROVIDER_LOOKUP: Record<string, string> = {
@@ -127,6 +133,7 @@ export function AtivarClientesPage() {
   const [novoCliente, setNovoCliente] = useState({ name: '', phone: '' })
   const [appKey, setAppKey] = useState('xcloud')
   const [panelKey, setPanelKey] = useState('yellow')
+  const [packageType, setPackageType] = useState<PackageType>('no_adult')
   const [planKey, setPlanKey] = useState('mensal')
   const [screensCount, setScreensCount] = useState<ScreensCount>(1)
   const [recommendation, setRecommendation] = useState<Recommendation | null>(null)
@@ -210,6 +217,8 @@ export function AtivarClientesPage() {
         app_key: nextApp,
         panel_key: nextPanel,
         screens_count: String(screensCount),
+        package_type: packageType,
+        adult_content: String(packageType === 'full_adult'),
         ...(clienteSelecionado?.id ? { client_id: clienteSelecionado.id } : {}),
         ...(activationTestId ? { test_id: activationTestId } : {}),
         ...(!clienteSelecionado?.id ? { client: novoCliente.name } : {}),
@@ -238,6 +247,7 @@ export function AtivarClientesPage() {
     setPanelKey(panelIdFromName(cliente.servidor) || 'yellow')
     setPlanKey(planIdFromName(cliente.plano) || 'mensal')
     setScreensCount(normalizeScreensCount(cliente.telas))
+    setPackageType('no_adult')
     setRecommendation(null)
     setRecommendationAttempted(false)
     setRecommendationError('')
@@ -295,6 +305,7 @@ export function AtivarClientesPage() {
     setProviderConfirmed(false)
     setSlotConfirmed(false)
     setProviderText('')
+    setPackageType('no_adult')
     setStep('app_plano')
   }
 
@@ -303,6 +314,7 @@ export function AtivarClientesPage() {
     const parsed = parseProviderText(value)
     if (parsed.planKey) setPlanKey(parsed.planKey)
     if (parsed.screensCount) setScreensCount(parsed.screensCount)
+    if (parsed.packageType === 'full_adult' || parsed.packageType === 'no_adult') setPackageType(parsed.packageType)
     setRecommendation(null)
     setRecommendationAttempted(false)
     setSlotConfirmed(false)
@@ -327,8 +339,10 @@ export function AtivarClientesPage() {
       return
     }
     if (recommendation?.requires_new_account) {
-      addToast('error', 'Nenhuma tela livre encontrada para este painel/app. Crie uma nova conta ou escolha outro painel.')
-      return
+      if (packageType !== 'full_adult') {
+        addToast('error', 'Nenhuma tela livre encontrada para este painel/app. Crie uma nova conta ou escolha outro painel.')
+        return
+      }
     }
     if (recommendation?.recommended && !slotConfirmed) {
       addToast('error', 'Confirme visualmente o uso da tela livre antes de ativar')
@@ -359,6 +373,8 @@ export function AtivarClientesPage() {
           panel_key: recommendation?.panel_key || panelKey,
           plan_key: planKey,
           screens_count: screensCount,
+          package_type: packageType,
+          adult_content: packageType === 'full_adult',
           amount: valorFinal,
           account_id: recommendation?.account_id || undefined,
           slot_id: recommendation?.slot_id || undefined,
@@ -378,6 +394,7 @@ export function AtivarClientesPage() {
             panel_name: parsedCredentials.panelName,
             app_name: parsedCredentials.appName,
             raw_text: parsedCredentials.rawText,
+            package_type: parsedCredentials.packageType,
           } : undefined,
           operator_ref: 'painel_web',
         }),
@@ -419,12 +436,14 @@ export function AtivarClientesPage() {
             provider_code: dispatchCredentials.provider_code,
             providerCode: dispatchCredentials.providerCode,
             code: dispatchCredentials.code,
+            package_type: packageType,
           },
           context: {
             source: 'painel1',
             client_id: data.activation?.client_id || clienteSelecionado?.id || '',
             test_id: data.activation?.test_id || activationTestId || '',
             operator_ref: 'painel_web',
+            package_type: packageType,
           },
         }),
       })
@@ -528,6 +547,18 @@ export function AtivarClientesPage() {
               </Panel>
               <Picker title="Aplicativo" items={APPS} value={appKey} onChange={(value) => { setAppKey(value); setProviderConfirmed(false); setSlotConfirmed(false); carregarRecomendacao(value, panelKey) }} />
               <Picker title="Painel gerador" items={PAINEIS.map(p => ({ ...p, color: '#60a5fa' }))} value={panelKey} onChange={(value) => { setPanelKey(value); setProviderConfirmed(false); setSlotConfirmed(false); carregarRecomendacao(appKey, value) }} />
+              <Picker
+                title="Pacote"
+                items={PACKAGE_OPTIONS}
+                value={packageType}
+                onChange={(value) => {
+                  setPackageType(value as PackageType)
+                  setRecommendation(null)
+                  setRecommendationAttempted(false)
+                  setSlotConfirmed(false)
+                  setProviderConfirmed(false)
+                }}
+              />
               <Panel title="Colar dados do painel">
                 <div className="space-y-3">
                   <textarea
@@ -611,6 +642,7 @@ export function AtivarClientesPage() {
                   <Row label="Cliente" value={selectedClientName} />
                   <Row label="App" value={APPS.find(item => item.id === appKey)?.label || appKey} />
                   <Row label="Painel" value={PAINEIS.find(item => item.id === panelKey)?.label || panelKey} />
+                  <Row label="Pacote" value={PACKAGE_OPTIONS.find((item) => item.id === packageType)?.label || 'Sem adulto'} />
                   <Row label="Plano" value={plano.displayLabel} />
                   <Row label="Telas" value={`${screensCount}`} />
                   <Row label="Valor" value={formatCurrencyBRL(valorFinal)} />
@@ -628,9 +660,12 @@ export function AtivarClientesPage() {
                 ) : recommendation ? (
                   <div className="space-y-2">
                     <p className="text-sm font-semibold" style={{ color: recommendation.recommended ? '#4ade80' : '#fbbf24' }}>
-                      {recommendation.recommended ? 'Tela livre encontrada' : 'Sem tela livre compativel'}
+                      {recommendation.recommended ? 'Tela livre encontrada' : packageType === 'full_adult' ? 'Sem tela +18 livre; gerar novo acesso' : 'Sem tela livre compativel'}
                     </p>
                     <p className="text-xs text-slate-500">{recommendation.reason}</p>
+                    {packageType === 'full_adult' && recommendation.requires_new_account && (
+                      <p className="text-xs text-amber-300">Ao confirmar, o sistema vai gerar um novo acesso completo +18 pela API configurada.</p>
+                    )}
                     {screensCount === 2 && recommendation.recommended && (
                       <p className="text-xs text-emerald-300">A recomendacao foi filtrada para duas telas livres na mesma conta.</p>
                     )}
@@ -671,7 +706,7 @@ export function AtivarClientesPage() {
               )}
               <Panel title="Confirmacao no provedor">
                 <div className="space-y-3">
-                  <p className="text-xs text-slate-500">Abra o painel correto, libere/renove o acesso no provedor e só depois confirme aqui para enviar a mensagem final.</p>
+                  <p className="text-xs text-slate-500">{packageType === 'full_adult' ? 'Confirme que a geracao completo +18 pode consumir credito se nao houver tela compativel livre.' : 'Abra o painel correto, libere/renove o acesso no provedor e só depois confirme aqui para enviar a mensagem final.'}</p>
                   <div className="grid gap-2 sm:grid-cols-2">
                     {providerPanelUrl && (
                       <button onClick={() => window.open(providerPanelUrl, '_blank')} className="h-10 rounded-xl text-xs font-semibold" style={{ background: 'rgba(59,130,246,0.12)', border: '1px solid rgba(59,130,246,0.25)', color: '#60a5fa' }}>
@@ -687,13 +722,13 @@ export function AtivarClientesPage() {
                         color: providerConfirmed ? '#4ade80' : '#cbd5e1',
                       }}
                     >
-                      {providerConfirmed ? 'Liberacao confirmada' : 'Ja liberei/renovei no painel'}
+                      {providerConfirmed ? 'Confirmado' : packageType === 'full_adult' ? 'Confirmo gerar completo +18' : 'Ja liberei/renovei no painel'}
                     </button>
                   </div>
                 </div>
               </Panel>
               <div className="grid gap-2 sm:grid-cols-2">
-                <button disabled={ativando || loadingRecommendation || Boolean(recommendationError) || Boolean(recommendation?.requires_new_account) || (clienteSelecionado?.id ? !recommendation : false) || Boolean(recommendation?.recommended && !slotConfirmed) || !providerConfirmed} onClick={ativarCliente} className="h-12 rounded-xl text-sm font-semibold text-white disabled:opacity-60" style={{ background: '#22c55e' }}>
+                <button disabled={ativando || loadingRecommendation || Boolean(recommendationError) || Boolean(recommendation?.requires_new_account && packageType !== 'full_adult') || (clienteSelecionado?.id ? !recommendation : false) || Boolean(recommendation?.recommended && !slotConfirmed) || !providerConfirmed} onClick={ativarCliente} className="h-12 rounded-xl text-sm font-semibold text-white disabled:opacity-60" style={{ background: '#22c55e' }}>
                   {ativando ? 'Ativando...' : 'Confirmar e enviar mensagem final'}
                 </button>
                 <button onClick={() => setStep('app_plano')} className="h-12 rounded-xl text-sm font-medium text-slate-400" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>Voltar</button>

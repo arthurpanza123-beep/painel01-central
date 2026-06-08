@@ -91,7 +91,7 @@ function testeVisivel(teste: Teste, now: number): boolean {
 
 // ——— Card de teste focado em countdown ———
 function TesteCard({
-  teste, onVerDetalhes, onAtivar, onAbrirPainel, onExpirar, onCopiarUsuario, isExpiring, highlighted,
+  teste, onVerDetalhes, onAtivar, onAbrirPainel, onExpirar, onCopiarUsuario, onGerarFullAdult, isExpiring, highlighted,
 }: {
   teste: Teste
   onVerDetalhes: () => void
@@ -99,6 +99,7 @@ function TesteCard({
   onAbrirPainel: () => void
   onExpirar: () => void
   onCopiarUsuario: () => void
+  onGerarFullAdult: () => void
   isExpiring?: boolean
   highlighted?: boolean
 }) {
@@ -227,6 +228,11 @@ function TesteCard({
             {(isAtivo || teste.status === 'pago') && (
               <button onClick={onAtivar} className="h-7 px-3 rounded-lg text-[11px] font-medium flex items-center gap-1.5 transition-all" style={{ background: 'rgba(34,197,94,0.1)', color: '#4ade80', border: '1px solid rgba(34,197,94,0.2)' }}>
                 <Zap className="h-3 w-3" /> Ativar cliente
+              </button>
+            )}
+            {isAtivo && (
+              <button onClick={onGerarFullAdult} className="h-7 px-3 rounded-lg text-[11px] font-medium flex items-center gap-1.5 transition-all" style={{ background: 'rgba(245,158,11,0.1)', color: '#fbbf24', border: '1px solid rgba(245,158,11,0.22)' }}>
+                <Zap className="h-3 w-3" /> Novo teste +18
               </button>
             )}
             {canExpire && (
@@ -532,6 +538,10 @@ export function TestesPage() {
                 teste={teste}
                 onVerDetalhes={() => addToast('info', `Detalhes: ${teste.usuario} / ${teste.senha}`)}
                 onAtivar={() => { window.dispatchEvent(new CustomEvent('centralplay:navigate', { detail: { page: 'ativar-clientes', test_id: teste.id, client_id: teste.clientId } })) }}
+                onGerarFullAdult={() => {
+                  window.dispatchEvent(new CustomEvent('centralplay:navigate', { detail: { page: 'gerar-teste' } }))
+                  addToast('info', 'Selecione Completo +18 no passo final do wizard')
+                }}
                 onAbrirPainel={() => abrirPainelProvedor(teste)}
 	                onExpirar={() => {
 	                  if (expiringTestId) return

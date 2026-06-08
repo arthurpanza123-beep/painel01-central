@@ -18,6 +18,8 @@ export type ParsedProviderCredentials = {
   planKey?: string
   screensCount?: 1 | 2
   amount?: number
+  packageType?: 'no_adult' | 'full_adult'
+  adultContent?: boolean
   confidence: 'low' | 'medium' | 'high'
   warnings: string[]
 }
@@ -190,6 +192,17 @@ function inferPlan(text: string): Pick<ParsedProviderCredentials, 'planKey' | 's
   return { planKey, screensCount, amount }
 }
 
+function inferPackage(text: string): Pick<ParsedProviderCredentials, 'packageType' | 'adultContent'> {
+  const normalized = normalizeText(text)
+  if (/sem\s*(adulto|\+?\s*18|adult)|no\s*adult/.test(normalized)) {
+    return { packageType: 'no_adult', adultContent: false }
+  }
+  if (/(completo|full|premium).{0,20}(\+?\s*18|adulto|adult)|(\+?\s*18|adulto|adult).{0,20}(completo|full|premium)/.test(normalized)) {
+    return { packageType: 'full_adult', adultContent: true }
+  }
+  return {}
+}
+
 export function parseProviderText(rawText: string): ParsedProviderCredentials {
   const text = String(rawText || '').trim()
   const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
@@ -219,6 +232,7 @@ export function parseProviderText(rawText: string): ParsedProviderCredentials {
   const panel = inferPanel(text, host)
   const app = inferApp(text, providerCode, code)
   const plan = inferPlan(text)
+  const pkg = inferPackage(text)
   const warnings: string[] = []
   if (!username) warnings.push('Usuario nao identificado.')
   if (!password) warnings.push('Senha nao identificada.')
@@ -245,6 +259,7 @@ export function parseProviderText(rawText: string): ParsedProviderCredentials {
     ...panel,
     ...app,
     ...plan,
+    ...pkg,
     confidence,
     warnings,
   }

@@ -4,6 +4,8 @@ import { readOperationalSettings } from '@/lib/services/operational-settings'
 import { getSupabaseServerClient } from '@/lib/supabase/server'
 import { runXcloudWorker } from '@/lib/services/xcloud-worker'
 import { normalizeXcloudDeviceKey, xcloudDeviceKeyDiagnostics, xcloudDeviceKeyValidationError } from '@/lib/services/xcloud-device-key'
+import { createFullAdultAccess } from '@/lib/services/full-adult-provider'
+import { normalizePackageType, packageMetadata, type PackageType } from '@/lib/services/package-options'
 
 import { generateTest } from './generate-test'
 import { createYellowBoxTest } from './providers/yellow-box'
@@ -26,6 +28,9 @@ export type CreateTestInput = {
   servidor?: string
   device_key?: string
   deviceKey?: string
+  adult_content?: boolean
+  package_type?: string
+  provider_package?: string
   operator_ref?: string
 }
 
@@ -77,6 +82,8 @@ const PANEL_ALIASES: Record<string, string> = {
   brasil_yellow: 'brasil_yellow',
   brasiltv: 'brasil_yellow',
   brasil_tv: 'brasil_yellow',
+  ninety: 'ninety',
+  noventa: 'ninety',
 }
 
 const YELLOW_SUPPORTED_APPS = new Set(['xcloud', 'blessed', 'playsim', 'funplay'])
@@ -318,6 +325,7 @@ async function guardExistingXcloudGeneration(input: {
   clientId: string
   appId: string
   operatorRef?: string | null
+  allowReplacement?: boolean
 }) {
   const database = db()
   const { data, error } = await database
@@ -358,6 +366,7 @@ async function guardExistingXcloudGeneration(input: {
     }
 
     const running = workerStatus === 'running' || (!workerStatus && dispatchStatus !== 'sent')
+    if (input.allowReplacement && !running) continue
     await writeLog('XCLOUD_DUPLICATE_GENERATION_BLOCKED', 'warning', {
       client_id: input.clientId,
       test_id: row.id,
@@ -415,6 +424,45 @@ async function cancelSupersededXcloudTests(input: {
   }
 
   return matches.length
+}
+
+async function cancelSupersededTests(input: {
+  clientId: string
+  appId: string
+  panelId: string
+  newTestId: string
+  packageType: PackageType
+}): Promise<number> {
+  const database = db()
+  const { data, error } = await database
+    .from('tests')
+    .select('id,legacy_metadata')
+    .eq('client_id', input.clientId)
+    .eq('app_id', input.appId)
+    .eq('panel_id', input.panelId)
+    .neq('id', input.newTestId)
+    .in('status', ['active', 'pending', 'generating'])
+  if (error) throw new TestCreateError(500, 'SUPERSEDED_TEST_LOOKUP_FAILED', error.message)
+
+  const now = new Date().toISOString()
+  const rows = (data || []) as Array<{ id: string; legacy_metadata: JsonRecord | null }>
+  for (const row of rows) {
+    const { error: updateError } = await database
+      .from('tests')
+      .update({
+        status: 'cancelled',
+        legacy_metadata: {
+          ...(row.legacy_metadata || {}),
+          superseded_by_test_id: input.newTestId,
+          superseded_at: now,
+          superseded_reason: input.packageType === 'full_adult' ? 'new_full_adult_test_generated' : 'new_test_generated',
+        },
+      })
+      .eq('id', row.id)
+    if (updateError) throw new TestCreateError(500, 'SUPERSEDED_TEST_UPDATE_FAILED', updateError.message)
+  }
+
+  return rows.length
 }
 
 async function getCurrentTestState(testId: string): Promise<{ status: string | null; legacy_metadata: JsonRecord }> {
@@ -568,7 +616,7 @@ async function resolveApp(appId: string | undefined, appKeyInput: string | undef
   return app
 }
 
-async function resolvePanel(panelId: string | undefined, panelKeyInput: string | undefined): Promise<PanelRow> {
+async function resolvePanel(panelId: string | undefined, panelKeyInput: string | undefined, packageType: PackageType): Promise<PanelRow> {
   const database = db()
   const panelKey = PANEL_ALIASES[normalizeKey(panelKeyInput)] || normalizeKey(panelKeyInput || 'yellow')
   const query = database.from('panels').select('id,key,name,supported_app_keys,status')
@@ -578,7 +626,9 @@ async function resolvePanel(panelId: string | undefined, panelKeyInput: string |
   if (error) throw new TestCreateError(500, 'PANEL_LOOKUP_FAILED', error.message)
   if (!data) throw new TestCreateError(404, 'PANEL_NOT_FOUND', 'Painel nao encontrado.')
   const panel = data as PanelRow
-  if (panel.key !== 'brasil_yellow') throw new TestCreateError(400, 'PANEL_NOT_IMPLEMENTED', 'Geracao real implementada inicialmente apenas para Yellow Box.')
+  if (panel.key !== 'brasil_yellow' && !(packageType === 'full_adult' && panel.key === 'ninety')) {
+    throw new TestCreateError(400, 'PANEL_NOT_IMPLEMENTED', 'Geracao real implementada inicialmente para Yellow Box; Ninety esta disponivel apenas no pacote completo +18.')
+  }
   if (panel.status && panel.status !== 'enabled') throw new TestCreateError(409, 'PANEL_DISABLED', 'Painel desabilitado.')
   return panel
 }
@@ -589,7 +639,19 @@ async function callProvider(input: {
   app: AppRow
   panel: PanelRow
   device_key?: string
+  package_type: PackageType
 }): Promise<ProviderTestResult> {
+  if (input.package_type === 'full_adult') {
+    return createFullAdultAccess({
+      client_name: input.client_name,
+      phone: input.phone,
+      app_key: input.app.key,
+      panel_key: input.panel.key,
+      panel_name: input.panel.name,
+      device_key: input.device_key,
+    })
+  }
+
   if (mode() === 'mock') {
     const generated = await generateTest({
       clientName: input.client_name,
@@ -762,6 +824,8 @@ export async function createGeneratedTest(input: CreateTestInput) {
   const deviceKey = normalizeXcloudDeviceKey(rawDeviceKey)
   const deviceKeyFormat = xcloudDeviceKeyDiagnostics(rawDeviceKey, deviceKey)
   const operatorRef = String(input.operator_ref || '').trim() || null
+  const packageType = normalizePackageType(input.package_type || input.provider_package || input.adult_content)
+  const pkg = packageMetadata(packageType)
 
   try {
     if (!clientName || !phoneRaw || !phoneE164) {
@@ -770,11 +834,11 @@ export async function createGeneratedTest(input: CreateTestInput) {
 
     await writeLog('TEST_CREATE_STARTED', 'info', {
       message: `Inicio da geracao de teste para ${clientName}.`,
-      metadata: { phone: maskPhone(phoneRaw), mode: testMode, operator_ref: operatorRef },
+      metadata: { phone: maskPhone(phoneRaw), mode: testMode, package_type: packageType, operator_ref: operatorRef },
     })
 
     const app = await resolveApp(input.app_id, input.app_key || input.app)
-    const panel = await resolvePanel(input.panel_id, input.panel_key || input.provider || input.servidor)
+    const panel = await resolvePanel(input.panel_id, input.panel_key || input.provider || input.servidor, packageType)
 
     if (!panel.supported_app_keys?.includes(app.key)) {
       throw new TestCreateError(400, 'APP_PANEL_INCOMPATIBLE', 'App e painel nao sao compativeis.')
@@ -793,6 +857,7 @@ export async function createGeneratedTest(input: CreateTestInput) {
         clientId: existingClient.id,
         appId: app.id,
         operatorRef,
+        allowReplacement: packageType === 'full_adult',
       })
 
       const reusableFailedTest = await findReusableFailedXcloudTest({
@@ -857,7 +922,7 @@ export async function createGeneratedTest(input: CreateTestInput) {
 
     await writeLog('TEST_PROVIDER_SELECTED', 'info', {
       message: `Provider selecionado: ${panel.name}.`,
-      metadata: { app_key: app.key, panel_key: panel.key, provider: providerName(panel.key), operator_ref: operatorRef },
+      metadata: { app_key: app.key, panel_key: panel.key, provider: providerName(panel.key), package_type: packageType, operator_ref: operatorRef },
     })
     await writeLog('YELLOW_BOX_TEST_START', 'info', {
       message: `Iniciando teste Yellow Box para app=${app.key}.`,
@@ -866,11 +931,12 @@ export async function createGeneratedTest(input: CreateTestInput) {
         phone: maskPhone(phoneRaw),
         device_key: deviceKey ? maskDeviceKey(deviceKey) : null,
         device_key_format: app.key === 'xcloud' ? deviceKeyFormat : null,
+        package_type: packageType,
         operator_ref: operatorRef,
       },
     })
 
-    const providerResult = await callProvider({ client_name: clientName, phone: phoneE164, app, panel, device_key: deviceKey || undefined })
+    const providerResult = await callProvider({ client_name: clientName, phone: phoneE164, app, panel, device_key: deviceKey || undefined, package_type: packageType })
     if (!providerResult.username || !providerResult.password) {
       throw new TestCreateError(502, 'PROVIDER_PAYLOAD_INCOMPLETE', 'Provider retornou teste sem usuario/senha.')
     }
@@ -908,6 +974,7 @@ export async function createGeneratedTest(input: CreateTestInput) {
         latest_test_started_at: startedAt,
         latest_test_pending_xcloud_confirmation: requiresXcloudConfirmation,
         test_does_not_consume_slot: true,
+        ...pkg,
       },
       updated_at: now,
     }
@@ -940,6 +1007,7 @@ export async function createGeneratedTest(input: CreateTestInput) {
         username: providerResult.username,
         password: providerResult.password,
         provider_code: providerCode || null,
+        ...pkg,
         duration_minutes: durationMinutes,
         game_mode_enabled: operationalSettings.game_mode_enabled,
         pending_xcloud_confirmation: requiresXcloudConfirmation,
@@ -956,6 +1024,24 @@ export async function createGeneratedTest(input: CreateTestInput) {
     }).select('id,status,expires_at').single()
     if (testResult.error) throw new TestCreateError(500, 'TEST_SAVE_FAILED', testResult.error.message)
     const test = testResult.data as SavedTestRow
+
+    if (packageType === 'full_adult') {
+      const supersededCount = await cancelSupersededTests({
+        clientId: client.id,
+        appId: app.id,
+        panelId: panel.id,
+        newTestId: test.id,
+        packageType,
+      })
+      if (supersededCount > 0) {
+        await writeLog('TEST_SUPERSEDED_PREVIOUS_FULL_ADULT', 'warning', {
+          client_id: client.id,
+          test_id: test.id,
+          message: `${supersededCount} teste(s) anterior(es) substituido(s) pelo teste completo +18.`,
+          metadata: { superseded_count: supersededCount, package_type: packageType, operator_ref: operatorRef },
+        })
+      }
+    }
 
     await createPipelineEvent({
       entity_type: 'test',
@@ -974,6 +1060,9 @@ export async function createGeneratedTest(input: CreateTestInput) {
         game_mode_enabled: operationalSettings.game_mode_enabled,
         pending_xcloud_confirmation: requiresXcloudConfirmation,
         test_does_not_consume_slot: true,
+        package_type: packageType,
+        adult_content: pkg.adult_content,
+        provider_package: pkg.provider_package,
       },
     })
 

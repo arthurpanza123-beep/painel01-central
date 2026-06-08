@@ -7,6 +7,7 @@ import {
   officialPlanLabel,
   type ScreensCount,
 } from '@/lib/services/official-plans'
+import { normalizePackageType, packageMetadata } from '@/lib/services/package-options'
 import { findAccountForClient, type AccountSharingSlot } from '@/lib/services/account-sharing'
 import { getSupabaseServerClient } from '@/lib/supabase/server'
 
@@ -243,6 +244,8 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   const client = clientData as ClientRow
   const planKey = normalizePlanKey(body.plan_key ?? body.plan)
   const screensCount = normalizeScreensCount(body.screens_count ?? body.screens)
+  const packageType = normalizePackageType(body.package_type ?? body.provider_package ?? body.adult_content ?? safeMetadata(client.legacy_metadata).package_type)
+  const pkg = packageMetadata(packageType)
   const amountCents = amountToCents(body.amount_cents ?? body.amount)
   const dueAt = parseDueAt(body.due_at ?? body.dueAt ?? body.vencimento)
   const phone = normalizePhone(body.phone ?? body.phone_e164 ?? body.telefone)
@@ -264,6 +267,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     screens_count: screensCount,
     amount_cents: amountCents ?? safeMetadata(client.legacy_metadata).amount_cents ?? null,
     renewal_due_at: dueAt || safeMetadata(client.legacy_metadata).renewal_due_at || null,
+    ...pkg,
     host: host || safeMetadata(client.legacy_metadata).host || null,
     dns: host || safeMetadata(client.legacy_metadata).dns || null,
     provider_code: providerCode || safeMetadata(client.legacy_metadata).provider_code || null,
@@ -335,6 +339,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         dns: host || null,
         provider_code: providerCode || null,
         screens_count: screensCount,
+        ...pkg,
         edited_from_client_drawer_at: now,
       },
     }
@@ -380,6 +385,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         manual_client_edit: true,
         screens_count: screensCount,
         plan_label: officialPlanLabel(planKey, screensCount),
+        ...pkg,
         second_screen_amount_cents: amountToCents(body.second_screen_amount_cents),
         note: notes || null,
         updated_at: now,
@@ -403,6 +409,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     'panel',
     'plan',
     'screens_count',
+    'package_type',
     amountCents !== null ? 'amount' : null,
     dueAt ? 'due_at' : null,
     String(body.username ?? body.usuario ?? '').trim() ? 'username' : null,
@@ -416,6 +423,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     changed_fields: changedFields,
     plan_key: planKey,
     screens_count: screensCount,
+    package_type: packageType,
     amount_cents: amountCents,
     due_at: dueAt,
     account_id: accountId,
@@ -434,6 +442,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       changed_fields: changedFields,
       plan_key: planKey,
       screens_count: screensCount,
+      package_type: packageType,
       amount_cents: amountCents,
       due_at: dueAt,
       warnings,
@@ -446,6 +455,8 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     plan_key: planKey,
     plan_label: officialPlanLabel(planKey, screensCount),
     screens_count: screensCount,
+    package_type: packageType,
+    adult_content: pkg.adult_content,
     amount_cents: amountCents,
     due_at: dueAt,
     warnings,
