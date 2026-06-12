@@ -54,10 +54,10 @@ async function existingNotificationKeys(keys: string[]) {
   if (!database || !keys.length) return new Set<string>()
   const { data } = await database
     .from('logs')
-    .select('metadata')
+    .select('event')
     .eq('scope', 'notification')
     .in('event', keys)
-  return new Set((data || []).map((row: { metadata?: JsonRecord | null }) => String(row.metadata?.notification_key || '')).filter(Boolean))
+  return new Set((data || []).map((row: { event?: string | null }) => String(row.event || '')).filter(Boolean))
 }
 
 async function insertNotification(input: Omit<PanelNotification, 'id' | 'created_at' | 'read' | 'metadata'> & { metadata?: JsonRecord }) {
