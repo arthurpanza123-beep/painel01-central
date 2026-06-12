@@ -18,6 +18,7 @@ type TestRow = {
   account_id: string | null
   device_key: string | null
   status: string | null
+  expires_at: string | null
   legacy_metadata: Record<string, unknown> | null
   created_at: string | null
   updated_at: string | null
@@ -46,15 +47,24 @@ const STAGE_RANK: Record<EtapaPipeline, number> = {
   renovacao: 5,
 }
 
+const PIPELINE_LOOKBACK_DAYS = 7
+
 function normalizePhone(value: string | null | undefined): string {
   const digits = String(value || '').replace(/\D/g, '')
   if (!digits) return ''
   return digits.startsWith('55') ? digits : `55${digits}`
 }
 
+function testExpired(test?: TestRow): boolean {
+  if (!test?.expires_at) return false
+  const expires = new Date(test.expires_at).getTime()
+  return Number.isFinite(expires) && expires <= Date.now()
+}
+
 function mapStage(clientStatus: string | null, test?: TestRow, renewal?: RenewalRow): EtapaPipeline {
   if (isXcloudProvisioningFailure(test)) return clientStatus === 'lead' ? 'novo_lead' : 'contato'
   if (renewal?.status === 'paid' || renewal?.status === 'applied' || test?.status === 'converted') return 'pagou'
+  if (testExpired(test)) return 'testando'
   if (test?.status === 'expired' || test?.status === 'failed' || test?.status === 'cancelled' || test?.status === 'archived') return 'testando'
   if (test?.status === 'active' || test?.status === 'generating' || test?.status === 'pending' || clientStatus === 'test_active') return 'teste_gerado'
   if (clientStatus === 'lead') return 'novo_lead'
@@ -153,12 +163,13 @@ export async function getPipelineData(): Promise<PipelineQueryResult> {
   }
 
   try {
-    const { last24hIso } = operationWindows()
+    const { now } = operationWindows()
+    const lookbackIso = new Date(now.getTime() - PIPELINE_LOOKBACK_DAYS * 24 * 60 * 60 * 1000).toISOString()
     const [eventsRes, todayClientsRes, testsRes, renewalsRes, appsRes, panelsRes] = await Promise.all([
-      db.from('pipeline_events').select('id,entity_type,entity_id,event_type,to_status,payload,created_at').gte('created_at', last24hIso).order('created_at', { ascending: false }).limit(500),
-      db.from('clients').select('id,name,phone_e164,status,notes,created_at,updated_at').gte('created_at', last24hIso).order('created_at', { ascending: false }).limit(150),
-      db.from('tests').select('id,client_id,app_id,panel_id,account_id,device_key,status,legacy_metadata,created_at,updated_at').gte('created_at', last24hIso).order('created_at', { ascending: false }),
-      db.from('renewals').select('id,client_id,amount_cents,status,created_at,updated_at').gte('created_at', last24hIso).order('created_at', { ascending: false }),
+      db.from('pipeline_events').select('id,entity_type,entity_id,event_type,to_status,payload,created_at').gte('created_at', lookbackIso).order('created_at', { ascending: false }).limit(700),
+      db.from('clients').select('id,name,phone_e164,status,notes,created_at,updated_at').gte('created_at', lookbackIso).order('created_at', { ascending: false }).limit(250),
+      db.from('tests').select('id,client_id,app_id,panel_id,account_id,device_key,status,expires_at,legacy_metadata,created_at,updated_at').or(`created_at.gte.${lookbackIso},updated_at.gte.${lookbackIso},status.in.(pending,generating,active)`).order('created_at', { ascending: false }).limit(700),
+      db.from('renewals').select('id,client_id,amount_cents,status,created_at,updated_at').gte('created_at', lookbackIso).order('created_at', { ascending: false }),
       db.from('apps').select('id,name,key'),
       db.from('panels').select('id,name,key'),
     ])
@@ -207,8 +218,11 @@ export async function getPipelineData(): Promise<PipelineQueryResult> {
       const test = latestTestByClient.get(client.id)
       const renewal = latestRenewalByClient.get(client.id)
       const event = latestEventByClient.get(client.id)
+      const lifecycleStage = mapStage(client.status, test, renewal)
       const eventStage = isXcloudProvisioningFailure(test) ? null : stageFromEvent(event)
-      const stage = mostAdvancedStage(mapStage(client.status, test, renewal), eventStage)
+      const stage = lifecycleStage === 'novo_lead' || lifecycleStage === 'contato'
+        ? mostAdvancedStage(lifecycleStage, eventStage)
+        : lifecycleStage
       if (String(client.status || '').toLowerCase() === 'active' && stage !== 'pagou') continue
       const app = test?.app_id ? appsById.get(test.app_id) : undefined
       const panel = test?.panel_id ? panelsById.get(test.panel_id) : undefined

@@ -17,6 +17,7 @@ import {
   Zap,
 } from 'lucide-react'
 import { useToast } from '@/components/ui/toast'
+import { NotificationCenter } from '@/components/shared/notification-center'
 
 const GerarTesteWizard    = dynamic(() => import('@/components/gerar-teste/gerar-teste-wizard').then(m => ({ default: m.GerarTesteWizard })), { ssr: false })
 const TestesPage           = dynamic(() => import('@/components/pages/testes-page').then(m => ({ default: m.TestesPage })), { ssr: false })
@@ -154,6 +155,7 @@ export default function App() {
   return (
     <div className="flex min-h-screen overflow-x-hidden" style={{ background: 'var(--background)' }}>
       <Sidebar activePage={page} onNavigate={navigate} />
+      <NotificationCenter />
       <GameModeToggle settings={settings} busy={settingsBusy} onToggle={toggleGameMode} />
       <button
         onClick={() => setMobileMenuOpen(true)}

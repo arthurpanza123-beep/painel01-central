@@ -4,7 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
 import {
   Users, Search, Phone, Package, Server, Calendar, DollarSign,
-  RefreshCw, Eye, Key, Tv2, Sparkles, X, Loader2,
+  RefreshCw, Eye, Key, Tv2, X, Loader2,
+  Bug, CheckCircle2, AlertCircle,
 } from 'lucide-react'
 import {
   MOCK_CLIENTES,
@@ -54,6 +55,14 @@ function formatBrFromInput(value: string) {
   const [year, month, day] = value.split('-')
   if (!year || !month || !day) return value
   return `${day}/${month}/${year}`
+}
+
+function isTodayIso(value?: string) {
+  if (!value) return false
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return false
+  const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' })
+  return formatter.format(date) === formatter.format(new Date())
 }
 
 function diasParaVencer(vencimento: string): number {
@@ -392,6 +401,112 @@ function SegundaTelaModal({
   )
 }
 
+type DebugStep = {
+  id: string
+  label: string
+  status: 'pending' | 'running' | 'done' | 'failed'
+}
+
+const DEBUG_XCLOUD_STEPS: DebugStep[] = [
+  { id: 'save', label: 'Salvar Xtream atual', status: 'pending' },
+  { id: 'open', label: 'Acessar painel XCloud', status: 'pending' },
+  { id: 'remove', label: 'Remover/desativar device', status: 'pending' },
+  { id: 'add', label: 'Adicionar device novamente', status: 'pending' },
+  { id: 'xtream', label: 'Reaplicar Xtream salvo', status: 'pending' },
+  { id: 'log', label: 'Registrar log da acao', status: 'pending' },
+]
+
+function DebugXcloudModal({
+  cliente,
+  onClose,
+}: {
+  cliente: Cliente
+  onClose: () => void
+}) {
+  const [steps, setSteps] = useState<DebugStep[]>(() => DEBUG_XCLOUD_STEPS.map((step, index) => ({ ...step, status: index === 0 ? 'running' : 'pending' })))
+  const [running, setRunning] = useState(false)
+  const [message, setMessage] = useState('')
+  const { addToast } = useToast()
+
+  const setStepStatus = (id: string, status: DebugStep['status']) => {
+    setSteps((prev) => prev.map((step) => step.id === id ? { ...step, status } : step))
+  }
+
+  const executar = async () => {
+    if (running) return
+    setRunning(true)
+    setMessage('')
+    setSteps(DEBUG_XCLOUD_STEPS.map((step, index) => ({ ...step, status: index === 0 ? 'running' : 'pending' })))
+    try {
+      setStepStatus('save', 'running')
+      const res = await fetch(`/api/clients/${cliente.id}/xcloud-debug`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirm: true, operator_ref: 'painel_web_client_button' }),
+      })
+      setStepStatus('save', 'done')
+      setStepStatus('open', 'done')
+      const data = await res.json().catch(() => null)
+      const result = data?.result || {}
+      setStepStatus('remove', result.device_deactivated || result.device_deleted || result.device_removed ? 'done' : res.ok ? 'done' : 'failed')
+      setStepStatus('add', result.device_added || result.device_recreated || result.device_already_exists ? 'done' : res.ok ? 'done' : 'failed')
+      setStepStatus('xtream', result.xtream_attached ? 'done' : res.ok ? 'done' : 'failed')
+      setStepStatus('log', res.ok ? 'done' : 'failed')
+      if (!res.ok || data?.success === false) throw new Error(data?.error || result.message || 'Debug XCloud falhou')
+      setMessage('Debug XCloud concluido com sucesso.')
+      addToast('success', 'Debug XCloud concluido')
+    } catch (error) {
+      setSteps((prev) => {
+        const firstRunning = prev.find((step) => step.status === 'running')
+        return prev.map((step) => step.id === firstRunning?.id ? { ...step, status: 'failed' } : step)
+      })
+      const errorMessage = error instanceof Error ? error.message : 'Debug XCloud falhou'
+      setMessage(errorMessage)
+      addToast('error', errorMessage)
+    } finally {
+      setRunning(false)
+    }
+  }
+
+  useEffect(() => {
+    void executar()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center px-4" style={{ background: 'rgba(5,7,12,0.78)' }}>
+      <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-lg rounded-2xl overflow-hidden" style={{ background: 'var(--background)', border: '1px solid var(--border)' }}>
+        <div className="flex items-start justify-between gap-4 p-5" style={{ borderBottom: '1px solid var(--border)' }}>
+          <div className="min-w-0">
+            <p className="text-[10px] text-slate-500 uppercase tracking-widest">Debug XCloud</p>
+            <h2 className="mt-1 text-lg font-semibold text-white truncate">{cliente.nome}</h2>
+            <p className="text-xs text-slate-500 truncate">{cliente.telefone} · {cliente.app}</p>
+          </div>
+          <button onClick={onClose} disabled={running} className="h-9 w-9 rounded-lg flex items-center justify-center text-slate-500 disabled:opacity-50" style={{ background: 'rgba(255,255,255,0.04)' }}>
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="p-5 space-y-3">
+          {steps.map((step) => {
+            const Icon = step.status === 'done' ? CheckCircle2 : step.status === 'failed' ? AlertCircle : Loader2
+            const color = step.status === 'done' ? '#22c55e' : step.status === 'failed' ? '#ef4444' : step.status === 'running' ? '#60a5fa' : '#64748b'
+            return (
+              <div key={step.id} className="flex items-center gap-3 rounded-xl p-3" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)' }}>
+                <Icon className={`h-4 w-4 ${step.status === 'running' ? 'animate-spin' : ''}`} style={{ color }} />
+                <span className="text-sm text-slate-200">{step.label}</span>
+              </div>
+            )
+          })}
+          {message && <p className="text-xs" style={{ color: message.includes('sucesso') ? '#4ade80' : '#f87171' }}>{message}</p>}
+          <button onClick={executar} disabled={running} className="h-11 w-full rounded-xl text-sm font-semibold disabled:opacity-60" style={{ background: 'rgba(20,184,166,0.14)', color: '#5eead4', border: '1px solid rgba(20,184,166,0.28)' }}>
+            {running ? 'Executando...' : 'Executar novamente'}
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  )
+}
+
 // ——— Page ———
 export function ClientesPage() {
   const [search, setSearch] = useState('')
@@ -400,6 +515,7 @@ export function ClientesPage() {
   const [renovando, setRenovando] = useState<Cliente | null>(null)
   const [renovandoId, setRenovandoId] = useState<string | null>(null)
   const [segundaTela, setSegundaTela] = useState<Cliente | null>(null)
+  const [debugXcloud, setDebugXcloud] = useState<Cliente | null>(null)
   const [segundaTelaId, setSegundaTelaId] = useState<string | null>(null)
   const [clientes, setClientes] = useState<Cliente[]>(MOCK_CLIENTES)
   const [dataSource, setDataSource] = useState<'mock' | 'supabase'>('mock')
@@ -523,17 +639,17 @@ export function ClientesPage() {
       setRenovando(c)
     }, color: '#60a5fa' },
     { label: 'Playlist / Credenciais', icon: Key, onClick: () => setSelecionado(c), color: '#14b8a6' },
-    { label: 'Ativar segunda tela', icon: Tv2, onClick: () => {
+    { label: c.secondScreenOfferAvailable || isTodayIso(c.activatedAt) ? 'Ofertar segunda tela' : 'Adicionar 2ª tela', icon: Tv2, onClick: () => {
       if (normalizeScreensCount(c.telas || (c.plano.includes('2') ? 2 : 1)) >= 2) {
         addToast('info', 'Cliente ja esta marcado com 2 telas')
         return
       }
+      if (!c.secondScreenOfferAvailable && !isTodayIso(c.activatedAt)) {
+        addToast('info', 'Venda antiga: segunda tela sera tratada como nova acao separada.')
+      }
       setSegundaTela(c)
-    }, color: '#f59e0b' },
-    { label: 'Codex IA', icon: Sparkles, onClick: () => {
-      navigator.clipboard.writeText(`Cliente: ${c.nome}\nTelefone: ${c.telefone}\nApp: ${c.app}\nServidor: ${c.servidor}\nPlano: ${c.plano}\nVencimento: ${c.vencimento}\n\nProblema/Pergunta:`)
-      addToast('success', 'Contexto copiado para Codex IA')
-    }, color: '#14b8a6' },
+    }, color: c.secondScreenOfferAvailable || isTodayIso(c.activatedAt) ? '#22c55e' : '#60a5fa' },
+    { label: 'Debug XCloud', icon: Bug, onClick: () => setDebugXcloud(c), color: '#14b8a6' },
     { label: 'Ver dados', icon: Eye, onClick: () => setSelecionado(c) },
   ]
 
@@ -643,6 +759,9 @@ export function ClientesPage() {
           }}
           onConfirm={confirmarSegundaTela}
         />
+      )}
+      {debugXcloud && (
+        <DebugXcloudModal cliente={debugXcloud} onClose={() => setDebugXcloud(null)} />
       )}
     </>
   )

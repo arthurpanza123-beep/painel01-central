@@ -135,6 +135,11 @@ export type ActivationRecommendation = {
   panel_key: string | null
   app_name: string | null
   panel_name: string | null
+  account_username?: string | null
+  account_password?: string | null
+  account_expires_at?: string | null
+  free_slots_after_activation?: number
+  shared_with?: Array<{ client_id: string; name: string | null; slot_number: number }>
 }
 
 type ActivationContext = {
@@ -545,6 +550,37 @@ async function findFreeSlot(appId: string, panelId?: string | null, requested?: 
   return null
 }
 
+async function accountOccupancyDetails(account: AccountRow, selectedSlots: SlotRow[]) {
+  const database = db()
+  const { data: slotsData, error: slotsError } = await database
+    .from('account_slots')
+    .select('id,account_id,client_id,slot_number,status')
+    .eq('account_id', account.id)
+    .order('slot_number', { ascending: true })
+  if (slotsError) throw new ActivationError(500, 'ACCOUNT_SLOT_DETAILS_FAILED', slotsError.message)
+
+  const slots = (slotsData || []) as Array<{ id: string; account_id: string; client_id: string | null; slot_number: number; status: string | null }>
+  const selectedIds = new Set(selectedSlots.map((slot) => slot.id))
+  const occupied = slots.filter((slot) => slot.client_id && !selectedIds.has(slot.id))
+  const clientIds = Array.from(new Set(occupied.map((slot) => slot.client_id).filter(Boolean))) as string[]
+  const clientsRes = clientIds.length
+    ? await database.from('clients').select('id,name').in('id', clientIds)
+    : { data: [], error: null }
+  if (clientsRes.error) throw new ActivationError(500, 'ACCOUNT_SLOT_CLIENTS_FAILED', clientsRes.error.message)
+
+  const clientsById = new Map((clientsRes.data || []).map((client: { id: string; name: string | null }) => [client.id, client]))
+  const capacity = Math.max(Number(account.max_slots || slots.length || 1), 1)
+  const occupiedAfter = occupied.length + selectedSlots.length
+  return {
+    free_slots_after_activation: Math.max(capacity - occupiedAfter, 0),
+    shared_with: occupied.map((slot) => ({
+      client_id: slot.client_id || '',
+      name: clientsById.get(slot.client_id || '')?.name || null,
+      slot_number: slot.slot_number,
+    })),
+  }
+}
+
 function providerFromPanel(panel: PanelRow | null): string | null {
   const key = String(panel?.key || '').toLowerCase()
   if (key.includes('ninety')) return 'ninety'
@@ -843,6 +879,7 @@ export async function getActivationRecommendation(input: {
   const reason = context.screens_count > 1
     ? `Usar ${context.screens_count} telas livres da conta ${accountLabel(found.account)} economiza credito`
     : `Usar tela livre na ${slotLabel(found.slot.slot_number)} da conta ${accountLabel(found.account)} economiza credito`
+  const occupancy = await accountOccupancyDetails(found.account, found.slots)
   await writeLog('ACTIVATION_RECOMMENDATION_FOUND', 'info', {
     client_id: context.client.id,
     test_id: context.test?.id || null,
@@ -878,6 +915,11 @@ export async function getActivationRecommendation(input: {
     panel_key: context.panel?.key || null,
     app_name: context.app.name,
     panel_name: context.panel?.name || null,
+    account_username: found.account.username || null,
+    account_password: found.account.password_secret || null,
+    account_expires_at: found.account.expires_at || null,
+    free_slots_after_activation: occupancy.free_slots_after_activation,
+    shared_with: occupancy.shared_with,
   }
 }
 
@@ -953,16 +995,45 @@ export async function activatePaidClient(input: ActivationInput) {
       throw new ActivationError(409, 'CLIENT_ALREADY_ACTIVE', 'Cliente ja esta ativo.')
     }
 
-    let requestedSlot = await findFreeSlot(context.app.id, context.panel?.id || null, {
-      account_id: input.account_id,
-      slot_id: input.slot_id,
-      slot_number: input.slot_number,
-    }, context.screens_count, packageType)
+    const pastedAccess = providerAccessFromPastedCredentials(context, input)
+    let requestedSlot = pastedAccess
+      ? await createConfirmedNewAccount(context, {
+        ...input,
+        create_new_account_confirmed: true,
+        account_id: undefined,
+        slot_id: undefined,
+        slot_number: undefined,
+        new_account: {
+          ...(input.new_account || {}),
+          username: pastedAccess.username,
+          password_secret: pastedAccess.password,
+          provider: providerFromPanel(context.panel) || undefined,
+          provider_code: publicCode(context.app.key, pastedAccess.provider_code) || undefined,
+          panel_external_id: input.new_account?.panel_external_id || pastedAccess.order_id,
+          expires_at: pastedAccess.expires_at || context.due_at,
+        },
+        credentials: {
+          ...(input.credentials || {}),
+          username: pastedAccess.username,
+          password: pastedAccess.password,
+          host: pastedAccess.host,
+          dns: pastedAccess.dns || pastedAccess.host,
+          provider_code: publicCode(context.app.key, pastedAccess.provider_code),
+          code: publicCode(context.app.key, pastedAccess.provider_code),
+          due_at: pastedAccess.expires_at,
+        },
+      }, packageType, pastedAccess)
+      : await findFreeSlot(context.app.id, context.panel?.id || null, {
+        account_id: input.account_id,
+        slot_id: input.slot_id,
+        slot_number: input.slot_number,
+      }, context.screens_count, packageType)
+
+    if (pastedAccess && requestedSlot) touched.created_account_id = requestedSlot.account.id
 
     if (!requestedSlot) {
       if (packageType === 'full_adult') {
-        const pastedAccess = providerAccessFromPastedCredentials(context, input)
-        const providerAccess = pastedAccess || await createFullAdultAccess({
+        const providerAccess = await createFullAdultAccess({
           client_name: context.client.name || context.client.id,
           phone: context.client.phone_e164 || context.client.phone_raw || '',
           app_key: context.app.key,

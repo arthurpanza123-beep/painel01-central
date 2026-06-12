@@ -26,7 +26,7 @@ export type FinanceQueryResult = {
   creditos: CreditoPainel[]
 }
 
-type ClientRow = { id: string; name?: string | null; status: string | null }
+type ClientRow = { id: string; name?: string | null; status: string | null; legacy_metadata?: Record<string, unknown> | null }
 type RenewalRow = { client_id?: string | null; plan_key: string | null; amount_cents: number | null; status: string | null; due_at: string | null; created_at?: string | null }
 type PaymentRow = { amount_cents: number | null; status: string | null; paid_at: string | null }
 type TestRow = { status: string | null; created_at: string | null }
@@ -58,6 +58,30 @@ function isMonthlyPlan(planKey?: string | null): boolean {
   return String(planKey || '').toLowerCase() === 'mensal'
 }
 
+function metadataString(metadata: Record<string, unknown> | null | undefined, key: string): string {
+  const value = metadata && typeof metadata === 'object' && !Array.isArray(metadata) ? metadata[key] : ''
+  return typeof value === 'string' ? value : ''
+}
+
+function clientDueAt(client: ClientRow, renewal?: RenewalRow): string {
+  return renewal?.due_at ||
+    metadataString(client.legacy_metadata, 'renewal_due_at') ||
+    metadataString(client.legacy_metadata, 'due_at') ||
+    metadataString(client.legacy_metadata, 'dueAt') ||
+    ''
+}
+
+function isValidActiveClient(client: ClientRow, renewal?: RenewalRow): boolean {
+  if (client.status !== 'active' || isTemporaryClient(client)) return false
+  const due = clientDueAt(client, renewal)
+  if (!due) return true
+  const date = new Date(due)
+  if (Number.isNaN(date.getTime())) return true
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
+  const dueDay = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(date)
+  return dueDay >= today
+}
+
 function calculateMonthlyRenewalForecast(clients: ClientRow[], renewals: RenewalRow[]) {
   const latest = latestRenewalsByClient(renewals)
   let total = 0
@@ -66,8 +90,8 @@ function calculateMonthlyRenewalForecast(clients: ClientRow[], renewals: Renewal
   const byPlan = new Map<string, number>()
 
   for (const client of clients) {
-    if (client.status !== 'active' || isTemporaryClient(client)) continue
     const renewal = latest.get(client.id)
+    if (!isValidActiveClient(client, renewal)) continue
     const amount = money(renewal?.amount_cents)
     if (renewal && isMonthlyPlan(renewal.plan_key) && amount > 0) {
       total += amount
@@ -133,7 +157,7 @@ export async function getFinanceData(): Promise<FinanceQueryResult> {
     const todayStart = windows.todayStartIso
 
     const [clientsRes, renewalsRes, paymentsRes, testsRes, creditsRes, panelsRes] = await Promise.all([
-      db.from('clients').select('id,name,status'),
+      db.from('clients').select('id,name,status,legacy_metadata'),
       db.from('renewals').select('client_id,plan_key,amount_cents,status,due_at,created_at').order('due_at', { ascending: true }),
       db.from('payments').select('amount_cents,status,paid_at').gte('paid_at', monthStart),
       db.from('tests').select('status,created_at').gte('created_at', todayStart),
@@ -189,7 +213,8 @@ export async function getFinanceData(): Promise<FinanceQueryResult> {
       .reduce((acc, r) => acc + money(r.amount_cents), 0)
     const monthlyForecast = calculateMonthlyRenewalForecast(clients, renewals)
     const porPlanoMap = Object.fromEntries(monthlyForecast.byPlan)
-    const clientesAtivos = clients.filter((c) => c.status === 'active' && !isTemporaryClient(c)).length
+    const latestRenewals = latestRenewalsByClient(renewals)
+    const clientesAtivos = clients.filter((c) => isValidActiveClient(c, latestRenewals.get(c.id))).length
     const testesPagos = tests.filter((t) => t.status === 'converted').length
     const testesAtivosHoje = tests.filter((t) => t.status === 'active').length
     const totalTestes = tests.length

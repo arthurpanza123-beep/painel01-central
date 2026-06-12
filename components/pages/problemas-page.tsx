@@ -99,7 +99,7 @@ function EventoRow({
                   className="h-8 px-3 rounded-lg text-xs font-medium flex items-center gap-1.5"
                   style={{ background: 'rgba(20,184,166,0.1)', color: '#14b8a6', border: '1px solid rgba(20,184,166,0.2)' }}
                 >
-                  <Cpu className="h-3.5 w-3.5" /> Enviar para Codex
+                  <Cpu className="h-3.5 w-3.5" /> Enviar para analise
                 </button>
                 {!resolvido && (
                   <button
@@ -156,7 +156,7 @@ data/hora: ${problema.criadoEm}${obs ? `\nobservacao: ${obs}` : ''}`
     'Acao proposta: abrir uma execucao controlada com contexto da tela, preservar envio manual e registrar o resultado antes de qualquer mudanca operacional.',
   ]
 
-  const runLabels = ['Codex analisando', 'Codex preparando alteração', 'Codex executando', 'Concluído']
+  const runLabels = ['Analisando ocorrencia', 'Preparando alteracao', 'Executando ajuste', 'Concluido']
 
   useEffect(() => {
     if (phase !== 'running') return
@@ -191,7 +191,7 @@ data/hora: ${problema.criadoEm}${obs ? `\nobservacao: ${obs}` : ''}`
               <Cpu className="h-5 w-5" />
             </div>
             <div>
-              <h3 className="text-base font-semibold text-white" style={{ fontFamily: 'var(--font-display)' }}>Codex IA</h3>
+              <h3 className="text-base font-semibold text-white" style={{ fontFamily: 'var(--font-display)' }}>Assistente operacional</h3>
               <p className="text-xs text-slate-500">Assistente operacional com confirmação antes de executar</p>
             </div>
           </div>
@@ -217,7 +217,7 @@ data/hora: ${problema.criadoEm}${obs ? `\nobservacao: ${obs}` : ''}`
           )}
           {phase === 'review' && (
             <div className="rounded-xl p-4" style={{ background: 'rgba(20,184,166,0.08)', border: '1px solid rgba(20,184,166,0.2)' }}>
-              <p className="mb-3 text-xs font-semibold uppercase tracking-wider" style={{ color: '#5eead4' }}>Resposta do Codex</p>
+              <p className="mb-3 text-xs font-semibold uppercase tracking-wider" style={{ color: '#5eead4' }}>Resposta da analise</p>
               <div className="space-y-2">
                 {sugestao.map((line) => <p key={line} className="text-sm text-slate-200">{line}</p>)}
               </div>
@@ -247,7 +247,7 @@ data/hora: ${problema.criadoEm}${obs ? `\nobservacao: ${obs}` : ''}`
             className="flex-1 h-10 rounded-xl text-sm font-semibold flex items-center justify-center gap-2"
             style={{ background: '#14b8a6', color: '#04201c' }}
           >
-            <Send className="h-4 w-4" /> Analisar com Codex
+            <Send className="h-4 w-4" /> Analisar ocorrencia
           </button>}
           {phase === 'review' && <button onClick={() => setPhase('running')} className="flex-1 h-10 rounded-xl text-sm font-semibold" style={{ background: '#22c55e', color: '#052e16' }}>Confirmar execução</button>}
           {phase === 'done' && <button onClick={() => onSend(obs)} className="flex-1 h-10 rounded-xl text-sm font-semibold" style={{ background: '#22c55e', color: '#052e16' }}>Finalizar</button>}
@@ -401,7 +401,7 @@ export function ProblemasPage() {
             problema={codexTarget}
             onClose={() => setCodexTarget(null)}
               onSend={(_obs) => {
-                addToast('success', 'Contexto enviado ao Codex')
+                addToast('success', 'Contexto enviado para analise')
                 setCodexTarget(null)
               }}
           />

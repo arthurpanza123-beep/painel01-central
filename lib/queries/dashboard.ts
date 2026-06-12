@@ -80,7 +80,7 @@ function getDashboardFromMock(): DashboardMetrics {
 // ─── SUPABASE REAL (read-only) ───────────────────────────────────────────────
 
 type CountResult = { count: number | null; error: { message?: string } | null }
-type ClientFinanceRow = { id: string; name: string | null; status: string | null }
+type ClientFinanceRow = { id: string; name: string | null; status: string | null; legacy_metadata?: Record<string, unknown> | null }
 type RenewalFinanceRow = { client_id: string | null; plan_key: string | null; amount_cents: number | null; created_at: string | null }
 
 function getCount(result: CountResult) {
@@ -162,7 +162,7 @@ async function getDashboardFromSupabase(): Promise<DashboardMetrics | null> {
       db.from('payments').select('amount_cents').eq('status', 'paid').gte('paid_at', todayStartIso),
       db.from('payments').select('amount_cents').eq('status', 'paid').gte('paid_at', monthStart),
       db.from('renewals').select('amount_cents').not('amount_cents', 'is', null).gte('due_at', nowIso).lte('due_at', in30dIso),
-      db.from('clients').select('id,name,status'),
+      db.from('clients').select('id,name,status,legacy_metadata'),
       db.from('renewals').select('client_id,plan_key,amount_cents,created_at'),
       db
         .from('panel_credit_snapshots')

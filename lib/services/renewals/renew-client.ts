@@ -303,7 +303,7 @@ export async function renewClient(input: RenewClientInput) {
     if (!clientData) throw new RenewalError(404, 'CLIENT_NOT_FOUND', 'Cliente nao encontrado.')
 
     const client = clientData as ClientRow
-    if (client.status !== 'active') throw new RenewalError(409, 'CLIENT_NOT_ACTIVE', 'Renovacao exige cliente active.')
+    if (['lead', 'test_active'].includes(String(client.status || ''))) throw new RenewalError(409, 'CLIENT_NOT_ACTIVE', 'Renovacao exige cliente ativo ou vencido.')
 
     const existingByKey = await findExistingByKey(clientId, idempotencyKey)
     if (existingByKey?.metadata) {
@@ -441,6 +441,7 @@ export async function renewClient(input: RenewClientInput) {
       database
         .from('clients')
         .update({
+          status: 'active',
           legacy_metadata: {
             ...safeMetadata(client.legacy_metadata),
             latest_renewal_id: renewalId,

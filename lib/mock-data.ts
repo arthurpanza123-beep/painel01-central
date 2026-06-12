@@ -46,8 +46,11 @@ export interface Cliente {
   rawStatus?: string
   activeTestId?: string
   activeTestStatus?: string
+  activatedAt?: string
+  secondScreenOfferAvailable?: boolean
   nome: string
   telefone: string
+  telefoneRaw?: string
   app: string
   servidor: string
   plano: string

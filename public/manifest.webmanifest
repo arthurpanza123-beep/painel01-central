@@ -1,0 +1,12 @@
+{
+  "name": "Central Play Plus",
+  "short_name": "Central Play",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0c0e14",
+  "theme_color": "#0c0e14",
+  "icons": [
+    { "src": "/favicon.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/apple-icon.png", "sizes": "180x180", "type": "image/png" }
+  ]
+}

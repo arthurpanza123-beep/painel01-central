@@ -27,6 +27,11 @@ type Recommendation = {
   panel_key: string | null
   app_name: string | null
   panel_name: string | null
+  account_username?: string | null
+  account_password?: string | null
+  account_expires_at?: string | null
+  free_slots_after_activation?: number
+  shared_with?: Array<{ client_id: string; name: string | null; slot_number: number }>
 }
 
 const APPS = [
@@ -190,6 +195,7 @@ export function AtivarClientesPage() {
     return clientes.filter((cliente) =>
       cliente.nome.toLowerCase().includes(s) ||
       cliente.telefone.includes(search) ||
+      (cliente.telefoneRaw || '').includes(search.replace(/\D/g, '')) ||
       cliente.usuario.toLowerCase().includes(s)
     )
   }, [clientes, search])
@@ -198,16 +204,39 @@ export function AtivarClientesPage() {
   const valorFinal = plano.amountCents / 100
   const activationTestId = selectedTestId || clienteSelecionado?.activeTestId || null
   const selectedClientName = clienteSelecionado?.nome || novoCliente.name || search
-  const selectedClientPhone = clienteSelecionado?.telefone || novoCliente.phone
+  const selectedClientPhone = clienteSelecionado?.telefoneRaw || clienteSelecionado?.telefone || novoCliente.phone
   const providerLookup = PANEL_PROVIDER_LOOKUP[panelKey] || panelKey
   const providerPanelUrl = getProviderPanelUrl(providerLookup)
   const compatibleApps = listCompatibleApps(providerLookup).slice(0, 8)
   const parsedCredentials = useMemo(() => providerText.trim() ? parseProviderText(providerText) : null, [providerText])
+  const hasPastedProviderText = Boolean(providerText.trim())
+  const finalActionDisabled =
+    ativando ||
+    loadingRecommendation ||
+    Boolean(!hasPastedProviderText && recommendation?.requires_new_account && packageType !== 'full_adult') ||
+    !providerConfirmed
+  const finalActionHint = loadingRecommendation
+    ? 'Buscando recomendacao de tela...'
+    : !hasPastedProviderText && recommendation?.requires_new_account && packageType !== 'full_adult'
+      ? 'Sem tela livre compativel para este pacote. Escolha completo +18 ou outro painel.'
+      : !providerConfirmed
+        ? 'Confirme que ja liberou/renovou no provedor.'
+        : !hasPastedProviderText && recommendation?.recommended && !slotConfirmed
+          ? 'A tela livre recomendada sera usada ao confirmar.'
+          : !hasPastedProviderText && clienteSelecionado?.id && !recommendation
+            ? 'A recomendacao sera buscada automaticamente ao confirmar.'
+            : recommendationError
+              ? 'A tentativa anterior falhou. Ao confirmar, o sistema tenta buscar a recomendacao novamente.'
+              : ''
 
-  async function carregarRecomendacao(nextApp = appKey, nextPanel = panelKey): Promise<Recommendation | null> {
+  async function carregarRecomendacao(
+    nextApp = appKey,
+    nextPanel = panelKey,
+    options: { resetProviderConfirmation?: boolean } = {},
+  ): Promise<Recommendation | null> {
     setRecommendation(null)
     setRecommendationError('')
-    setProviderConfirmed(false)
+    if (options.resetProviderConfirmation !== false) setProviderConfirmed(false)
     setSlotConfirmed(false)
     setRecommendationAttempted(true)
     if (!clienteSelecionado?.id) return null
@@ -325,6 +354,10 @@ export function AtivarClientesPage() {
       addToast('error', 'Informe nome e telefone do cliente')
       return
     }
+    if (hasPastedProviderText) {
+      setStep('confirmar')
+      return
+    }
     const loaded = recommendation || await carregarRecomendacao()
     if (!loaded && clienteSelecionado?.id) {
       setStep('confirmar')
@@ -334,18 +367,22 @@ export function AtivarClientesPage() {
   }
 
   async function ativarCliente() {
-    if (clienteSelecionado?.id && !recommendation) {
-      addToast('error', 'Busque uma recomendacao de tela antes de confirmar a ativacao real')
-      return
+    let activeRecommendation = hasPastedProviderText ? null : recommendation
+    if (!hasPastedProviderText && clienteSelecionado?.id && !activeRecommendation) {
+      activeRecommendation = await carregarRecomendacao(appKey, panelKey, { resetProviderConfirmation: false })
+      if (!activeRecommendation) {
+        addToast('error', 'Nao foi possivel buscar a recomendacao de tela. Tente novamente.')
+        return
+      }
     }
-    if (recommendation?.requires_new_account) {
+    if (activeRecommendation?.requires_new_account) {
       if (packageType !== 'full_adult') {
         addToast('error', 'Nenhuma tela livre encontrada para este painel/app. Crie uma nova conta ou escolha outro painel.')
         return
       }
     }
-    if (recommendation?.recommended && !slotConfirmed) {
-      addToast('error', 'Confirme visualmente o uso da tela livre antes de ativar')
+    if (activeRecommendation?.recommended && !slotConfirmed) {
+      addToast('error', 'Confirme visualmente a conta e a tela antes de concluir.')
       return
     }
     if (!providerConfirmed) {
@@ -367,18 +404,26 @@ export function AtivarClientesPage() {
         body: JSON.stringify({
           ...(clienteSelecionado?.id ? { client_id: clienteSelecionado.id } : { client: { name: selectedClientName, phone: selectedClientPhone } }),
           ...(activationTestId ? { test_id: activationTestId } : {}),
-          app_id: recommendation?.app_id || undefined,
-          panel_id: recommendation?.panel_id || undefined,
-          app_key: recommendation?.app_key || appKey,
-          panel_key: recommendation?.panel_key || panelKey,
+          app_id: activeRecommendation?.app_id || undefined,
+          panel_id: activeRecommendation?.panel_id || undefined,
+          app_key: activeRecommendation?.app_key || appKey,
+          panel_key: activeRecommendation?.panel_key || panelKey,
           plan_key: planKey,
           screens_count: screensCount,
           package_type: packageType,
           adult_content: packageType === 'full_adult',
           amount: valorFinal,
-          account_id: recommendation?.account_id || undefined,
-          slot_id: recommendation?.slot_id || undefined,
-          slot_number: recommendation?.slot_number || undefined,
+          account_id: hasPastedProviderText ? undefined : activeRecommendation?.account_id || undefined,
+          slot_id: hasPastedProviderText ? undefined : activeRecommendation?.slot_id || undefined,
+          slot_number: hasPastedProviderText ? undefined : activeRecommendation?.slot_number || undefined,
+          create_new_account_confirmed: hasPastedProviderText ? true : undefined,
+          new_account: parsedCredentials ? {
+            username: parsedCredentials.username,
+            password_secret: parsedCredentials.password,
+            provider_code: parsedCredentials.providerCode || parsedCredentials.code,
+            panel_external_id: parsedCredentials.providerCode || parsedCredentials.code,
+            expires_at: parsedCredentials.dueAt,
+          } : undefined,
           due_at: parsedCredentials?.dueAt || undefined,
           credentials: parsedCredentials ? {
             username: parsedCredentials.username,
@@ -424,7 +469,7 @@ export function AtivarClientesPage() {
           client: { name: selectedClientName, phone: selectedClientPhone },
           activation: {
             app: APPS.find((item) => item.id === appKey)?.label || appKey,
-            panel: recommendation?.panel_name || PAINEIS.find((item) => item.id === panelKey)?.label || panelKey,
+            panel: activeRecommendation?.panel_name || PAINEIS.find((item) => item.id === panelKey)?.label || panelKey,
             plan: plano.displayLabel,
             amount: formatCurrencyBRL(valorFinal),
             dueAt: displayDueAt,
@@ -640,6 +685,7 @@ export function AtivarClientesPage() {
               <Panel title="Confirmacao">
                 <div className="space-y-2 text-sm">
                   <Row label="Cliente" value={selectedClientName} />
+                  <Row label="Telefone" value={selectedClientPhone} />
                   <Row label="App" value={APPS.find(item => item.id === appKey)?.label || appKey} />
                   <Row label="Painel" value={PAINEIS.find(item => item.id === panelKey)?.label || panelKey} />
                   <Row label="Pacote" value={PACKAGE_OPTIONS.find((item) => item.id === packageType)?.label || 'Sem adulto'} />
@@ -654,7 +700,7 @@ export function AtivarClientesPage() {
                   {providerPanelUrl && <Row label="Painel do provedor" value={providerPanelUrl} />}
                 </div>
               </Panel>
-              <Panel title="Recomendacao de tela">
+              {!hasPastedProviderText && <Panel title="Recomendacao de tela">
                 {loadingRecommendation ? <p className="text-sm text-slate-500">Buscando tela livre...</p> : recommendationError ? (
                   <p className="text-sm text-red-300">{recommendationError}</p>
                 ) : recommendation ? (
@@ -673,6 +719,26 @@ export function AtivarClientesPage() {
                       <div className="space-y-3">
                         <p className="text-xs text-emerald-300">Existe tela livre nesta conta. Usar essa tela economiza crédito.</p>
                         <p className="text-xs text-slate-500">{recommendation.account_label}: {recommendation.slot_label}</p>
+                        <div className="grid gap-2 text-xs sm:grid-cols-2">
+                          <Row label="Conta usada" value={recommendation.account_label || '-'} />
+                          <Row label="Usuario da conta" value={recommendation.account_username || '-'} />
+                          <Row label="Senha da conta" value={recommendation.account_password || '-'} />
+                          <Row label="Tela/slot ocupado" value={recommendation.slot_label || '-'} />
+                          <Row label="Telas livres apos ativar" value={String(recommendation.free_slots_after_activation ?? '-')} />
+                          <Row label="Vencimento da conta" value={formatDateBR(recommendation.account_expires_at || '') || '-'} />
+                          <Row label="Vencimento do cliente" value={formatDateBR(parsedCredentials?.dueAt || '') || 'Calculado pelo plano'} />
+                          <Row label="Valor/plano" value={`${plano.displayLabel} · ${formatCurrencyBRL(valorFinal)}`} />
+                        </div>
+                        {recommendation.shared_with?.length ? (
+                          <div className="rounded-lg p-3" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)' }}>
+                            <p className="mb-1 text-[11px] text-slate-500 uppercase tracking-wider">Vai dividir com</p>
+                            {recommendation.shared_with.map((item) => (
+                              <p key={`${item.client_id}:${item.slot_number}`} className="text-xs text-slate-300">Tela {item.slot_number}: {item.name || item.client_id}</p>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-xs text-slate-500">Conta sem outro cliente ocupando tela no momento.</p>
+                        )}
                         <button
                           onClick={() => setSlotConfirmed((value) => !value)}
                           className="h-10 w-full rounded-xl text-xs font-semibold"
@@ -692,7 +758,7 @@ export function AtivarClientesPage() {
                 ) : (
                   <p className="text-sm text-slate-500">A recomendacao sera buscada antes da ativacao.</p>
                 )}
-              </Panel>
+              </Panel>}
               {parsedCredentials && (
                 <Panel title="Credenciais extraidas">
                   <div className="grid gap-2 text-sm">
@@ -728,11 +794,14 @@ export function AtivarClientesPage() {
                 </div>
               </Panel>
               <div className="grid gap-2 sm:grid-cols-2">
-                <button disabled={ativando || loadingRecommendation || Boolean(recommendationError) || Boolean(recommendation?.requires_new_account && packageType !== 'full_adult') || (clienteSelecionado?.id ? !recommendation : false) || Boolean(recommendation?.recommended && !slotConfirmed) || !providerConfirmed} onClick={ativarCliente} className="h-12 rounded-xl text-sm font-semibold text-white disabled:opacity-60" style={{ background: '#22c55e' }}>
+                <button disabled={finalActionDisabled} onClick={ativarCliente} className="h-12 rounded-xl text-sm font-semibold text-white disabled:opacity-60" style={{ background: '#22c55e' }}>
                   {ativando ? 'Ativando...' : 'Confirmar e enviar mensagem final'}
                 </button>
                 <button onClick={() => setStep('app_plano')} className="h-12 rounded-xl text-sm font-medium text-slate-400" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>Voltar</button>
               </div>
+              {finalActionHint && (
+                <p className="text-xs text-slate-500">{finalActionHint}</p>
+              )}
             </motion.div>
           )}
         </AnimatePresence>

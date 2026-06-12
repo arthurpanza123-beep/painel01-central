@@ -37,6 +37,7 @@ type AccountRow = {
   max_slots: number | null
   status: string | null
   expires_at: string | null
+  activated_at: string | null
   panel_external_id: string | null
   provider: string | null
   provider_code: string | null
@@ -97,7 +98,54 @@ function codeFromSeed(seed: string): string {
   return `#${String(n).padStart(4, '0')}`
 }
 
-function mapStatus(value: string | null): Cliente['status'] {
+function metadataString(metadata: Record<string, unknown> | null | undefined, key: string): string {
+  const value = metadata && typeof metadata === 'object' && !Array.isArray(metadata) ? metadata[key] : ''
+  return typeof value === 'string' ? value : ''
+}
+
+function nestedMetadataString(metadata: Record<string, unknown> | null | undefined, path: string[]): string {
+  let current: unknown = metadata
+  for (const key of path) {
+    if (!current || typeof current !== 'object' || Array.isArray(current)) return ''
+    current = (current as Record<string, unknown>)[key]
+  }
+  return typeof current === 'string' ? current : ''
+}
+
+function isBeforeToday(value: string | null | undefined): boolean {
+  if (!value) return false
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return false
+  const today = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date())
+  const dueDay = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date)
+  return dueDay < today
+}
+
+function isSameOperationDay(value: string | null | undefined): boolean {
+  if (!value) return false
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return false
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  })
+  return formatter.format(date) === formatter.format(new Date())
+}
+
+function mapStatus(value: string | null, dueAt?: string | null): Cliente['status'] {
+  if (isBeforeToday(dueAt)) return 'expirado'
   if (value === 'active' || value === 'ativo') return 'ativo'
   if (value === 'expired' || value === 'expirado') return 'expirado'
   if (value === 'pending' || value === 'pendente' || value === 'test_active') return 'pendente'
@@ -200,10 +248,26 @@ function latestTestsByClient(tests: TestRow[]) {
 }
 
 function testMetadataString(test: TestRow | undefined | null, key: string): string {
-  const value = test?.legacy_metadata && typeof test.legacy_metadata === 'object' && !Array.isArray(test.legacy_metadata)
-    ? test.legacy_metadata[key]
-    : ''
-  return typeof value === 'string' ? value : ''
+  return metadataString(test?.legacy_metadata, key)
+}
+
+function resolveClientDueAt(input: {
+  renewal?: RenewalRow
+  slot?: SlotRow | null
+  account?: AccountRow | null
+  client: ClientRow
+}): string {
+  return input.renewal?.due_at ||
+    input.slot?.expires_at ||
+    input.account?.expires_at ||
+    metadataString(input.client.legacy_metadata, 'renewal_due_at') ||
+    metadataString(input.client.legacy_metadata, 'due_at') ||
+    metadataString(input.client.legacy_metadata, 'dueAt') ||
+    metadataString(input.client.legacy_metadata, 'planDueAt') ||
+    nestedMetadataString(input.client.legacy_metadata, ['legacy', 'metadata', 'dueAt']) ||
+    nestedMetadataString(input.client.legacy_metadata, ['legacy', 'metadata', 'planDueAt']) ||
+    input.client.created_at ||
+    ''
 }
 
 export async function getClientsData(options: ClientsQueryOptions = {}): Promise<ClientsQueryResult> {
@@ -217,7 +281,7 @@ export async function getClientsData(options: ClientsQueryOptions = {}): Promise
   try {
     const [clientsRes, accountsRes, slotsRes, renewalsRes, testsRes, appsRes, panelsRes] = await Promise.all([
       db.from('clients').select('id,name,phone_e164,status,source,notes,created_at,legacy_metadata').order('created_at', { ascending: true }),
-      db.from('accounts').select('id,client_id,username,password_secret,max_slots,status,expires_at,panel_external_id,provider,provider_code,app_id,panel_id,legacy_metadata,created_at').order('created_at', { ascending: true }),
+      db.from('accounts').select('id,client_id,username,password_secret,max_slots,status,expires_at,activated_at,panel_external_id,provider,provider_code,app_id,panel_id,legacy_metadata,created_at').order('created_at', { ascending: true }),
       db.from('account_slots').select('id,account_id,client_id,slot_number,status,assigned_at,expires_at').order('slot_number', { ascending: true }),
       db.from('renewals').select('id,client_id,plan_key,amount_cents,status,due_at,metadata').order('created_at', { ascending: true }),
       db.from('tests').select('id,client_id,app_id,panel_id,account_id,provider,provider_code,status,expires_at,created_at,legacy_metadata').in('status', ['pending', 'generating', 'active']).order('created_at', { ascending: true }),
@@ -246,13 +310,14 @@ export async function getClientsData(options: ClientsQueryOptions = {}): Promise
       const account = findAccountForClient(client.id, accounts, slots)
       const slot = findSlotForClient(client.id, slots)
       const test = latestActiveTestByClient.get(client.id)
-      if (options.context === 'activation' && !matchesActivationSearch({ search: options.search, client, account, test })) return []
+      if (options.search && !matchesActivationSearch({ search: options.search, client, account, test })) return []
       const renewal = renewalByClientId.get(client.id)
       const app = account?.app_id ? appsById.get(account.app_id) : test?.app_id ? appsById.get(test.app_id) : null
       const panel = account?.panel_id ? panelsById.get(account.panel_id) : test?.panel_id ? panelsById.get(test.panel_id) : null
       const appName = app?.name || account?.provider || test?.provider || 'Aplicativo'
       const serverName = panel?.name || providerDisplayName(account?.provider || test?.provider) || 'Servidor'
-      const dueDate = renewal?.due_at || slot?.expires_at || account?.expires_at || client.created_at || ''
+      const dueDate = resolveClientDueAt({ renewal, slot, account, client })
+      const activatedAt = account?.activated_at || metadataString(client.legacy_metadata, 'activated_at') || metadataString(client.legacy_metadata, 'activation_at') || client.created_at || ''
       const inferredTwoScreens = account?.max_slots === 2 && Number(renewal?.amount_cents || 0) >= 3000 ? 2 : 1
       const screensCount = normalizeScreensCount(
         metadataNumber(renewal?.metadata, 'screens_count') ??
@@ -270,6 +335,7 @@ export async function getClientsData(options: ClientsQueryOptions = {}): Promise
         activeTestStatus: test?.status || undefined,
         nome: client.name || 'Cliente',
         telefone: maskPhone(client.phone_e164 || ''),
+        telefoneRaw: client.phone_e164 || '',
         app: appName,
         servidor: serverName,
         plano: planWithScreens,
@@ -278,8 +344,10 @@ export async function getClientsData(options: ClientsQueryOptions = {}): Promise
         vencimento: formatDateBR(dueDate),
         usuario: maskUsername(account?.username || testMetadataString(test, 'username') || testMetadataString(test, 'xtream_username') || 'usuario'),
         senha: maskPassword(account?.password_secret || testMetadataString(test, 'xtream_password') || 'senha'),
-        status: mapStatus(client.status),
+        status: mapStatus(client.status, dueDate),
         criadoEm: formatDateBR(client.created_at || new Date().toISOString()),
+        activatedAt,
+        secondScreenOfferAvailable: screensCount < 2 && isSameOperationDay(activatedAt),
       }]
     })
 
