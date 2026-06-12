@@ -193,9 +193,16 @@ export async function listPanelNotifications(): Promise<PanelNotification[]> {
     .order('created_at', { ascending: false })
     .limit(80)
   if (error) throw new Error(error.message)
-  return ((data || []) as Array<{ id: string; event: string; message: string | null; client_id: string | null; test_id: string | null; metadata: JsonRecord | null; created_at: string }>).map((row) => ({
+  const seen = new Set<string>()
+  return ((data || []) as Array<{ id: string; event: string; message: string | null; client_id: string | null; test_id: string | null; metadata: JsonRecord | null; created_at: string }>)
+    .filter((row) => {
+      if (seen.has(row.event)) return false
+      seen.add(row.event)
+      return true
+    })
+    .map((row) => ({
     id: row.id,
-    key: String(row.metadata?.notification_key || row.event),
+    key: row.event,
     type: String(row.metadata?.notification_type || 'test_created') as PanelNotification['type'],
     title: String(row.metadata?.title || 'Notificação'),
     body: String(row.metadata?.body || row.message || ''),
